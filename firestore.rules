@@ -1,0 +1,140 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ═══════════════════════════════════════════════════════════════
+    // HELPER FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════
+
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if user is the document owner
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    // Check if user is in the players list
+    function isPlayer(playerIds) {
+      return request.auth.uid in playerIds;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // USER PROFILES
+    // ═══════════════════════════════════════════════════════════════
+
+    match /users/{userId} {
+      // Anyone authenticated can read user profiles (for displaying names)
+      allow read: if isAuthenticated();
+
+      // Users can create their own profile
+      allow create: if isOwner(userId)
+        && request.resource.data.keys().hasAll(['displayName', 'createdAt'])
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() >= 2
+        && request.resource.data.displayName.size() <= 30;
+
+      // Users can update limited fields on their own profile (including presence fields)
+      allow update: if isOwner(userId)
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['displayName', 'avatarUrl', 'lastActiveAt', 'isAnonymous', 'email', 'fcmTokens', 'activeSessions', 'notificationPreferences', 'isOnline', 'lastHeartbeat']);
+
+      // Users cannot delete profiles
+      allow delete: if false;
+
+      // Friends subcollection
+      match /friends/{friendId} {
+        // Users can read their own friends list
+        // Also allow reading if you are the friend (to see your own status)
+        allow read: if isAuthenticated()
+          && (isOwner(userId) || isOwner(friendId));
+
+        // All friend writes go through Cloud Functions for data integrity
+        allow write: if false;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // LOBBIES
+    // ═══════════════════════════════════════════════════════════════
+
+    match /lobbies/{lobbyId} {
+      // Anyone authenticated can read lobbies (for lobby list)
+      allow read: if isAuthenticated();
+
+      // All lobby writes go through Cloud Functions
+      // Direct writes are disabled for security
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // GAMES
+    // ═══════════════════════════════════════════════════════════════
+
+    match /games/{gameId} {
+      // Only players in the game can read it
+      allow read: if isAuthenticated()
+        && isPlayer(resource.data.playerIds);
+
+      // All game writes go through Cloud Functions
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+
+      // Turn history subcollection
+      match /turns/{turnId} {
+        // Players can read turn history
+        allow read: if isAuthenticated()
+          && isPlayer(get(/databases/$(database)/documents/games/$(gameId)).data.playerIds);
+
+        // Writes only through Cloud Functions
+        allow write: if false;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // FRIEND CHALLENGES
+    // ═══════════════════════════════════════════════════════════════
+
+    match /friendChallenges/{challengeId} {
+      // Only the challenger or challenged player can read the challenge
+      allow read: if isAuthenticated()
+        && (request.auth.uid == resource.data.challengerId
+            || request.auth.uid == resource.data.challengedId);
+
+      // All challenge writes go through Cloud Functions
+      allow write: if false;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // DICTIONARIES (Read-only reference data)
+    // ═══════════════════════════════════════════════════════════════
+
+    match /dictionaries/{dictionaryId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+
+      match /words/{wordId} {
+        allow read: if isAuthenticated();
+        allow write: if false;
+      }
+
+      match /prefixes/{prefixId} {
+        allow read: if isAuthenticated();
+        allow write: if false;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // DEFAULT: Deny all other access
+    // ═══════════════════════════════════════════════════════════════
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
