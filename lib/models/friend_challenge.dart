@@ -19,6 +19,7 @@ class FriendChallenge {
   final ChallengeStatus status;
   final String? gameId;
   final String? lobbyId;
+  final bool isParty;
   final DateTime createdAt;
   final DateTime expiresAt;
 
@@ -31,6 +32,7 @@ class FriendChallenge {
     required this.status,
     this.gameId,
     this.lobbyId,
+    this.isParty = false,
     required this.createdAt,
     required this.expiresAt,
   });
@@ -58,6 +60,7 @@ class FriendChallenge {
       ),
       gameId: data['gameId'],
       lobbyId: data['lobbyId'],
+      isParty: data['isParty'] as bool? ?? false,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       expiresAt: (data['expiresAt'] as Timestamp?)?.toDate() ??
           DateTime.now().add(const Duration(seconds: 60)),
@@ -73,6 +76,7 @@ class FriendChallenge {
       'status': status.name,
       'gameId': gameId,
       'lobbyId': lobbyId,
+      'isParty': isParty,
       'createdAt': Timestamp.fromDate(createdAt),
       'expiresAt': Timestamp.fromDate(expiresAt),
     };
@@ -92,6 +96,7 @@ class FriendChallenge {
       status: status ?? this.status,
       gameId: gameId ?? this.gameId,
       lobbyId: lobbyId ?? this.lobbyId,
+      isParty: isParty,
       createdAt: createdAt,
       expiresAt: expiresAt,
     );

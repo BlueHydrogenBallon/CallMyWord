@@ -32,6 +32,12 @@ dependencies:
   share_plus: ^7.2.1
   url_launcher: ^6.2.1
 
+  # Animations
+  confetti: ^0.7.0
+
+  # HTTP
+  http: ^1.2.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -52,6 +58,8 @@ flutter:
   assets:
     - assets/audio/
     - assets/images/
+    - functions/src/utils/words_english.txt
+    - functions/src/utils/words_greek.txt
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

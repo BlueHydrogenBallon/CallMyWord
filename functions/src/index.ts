@@ -55,3 +55,11 @@ export {
   onUserPresenceChange,
   cleanupStalePresence,
 } from "./presence";
+
+// Export party (multiplayer) functions
+export {
+  createPartyLobby,
+  joinPartyLobby,
+  startPartyGame,
+  leavePartyLobby,
+} from "./party";

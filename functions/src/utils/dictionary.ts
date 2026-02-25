@@ -1,11 +1,12 @@
 /**
  * Dictionary service for word validation
- * Uses a comprehensive English word list for word game validation
+ * Supports English and Greek word lists
  */
 
 import { ENGLISH_WORDS } from "./words";
+import { GREEK_WORDS } from "./words_greek";
 
-// Build prefix set for quick prefix validation
+// Build English prefix set for quick prefix validation
 const VALID_PREFIXES = new Set<string>();
 for (const word of ENGLISH_WORDS) {
   for (let i = 1; i <= word.length; i++) {
@@ -13,11 +14,26 @@ for (const word of ENGLISH_WORDS) {
   }
 }
 
+// Build Greek prefix set (words are stored uppercase)
+const GREEK_VALID_PREFIXES = new Set<string>();
+for (const word of GREEK_WORDS) {
+  for (let i = 1; i <= word.length; i++) {
+    GREEK_VALID_PREFIXES.add(word.substring(0, i));
+  }
+}
+
 /**
- * Check if a word exists in the dictionary
+ * Check if a word exists in the English dictionary
  */
 export function isValidWord(word: string): boolean {
   return ENGLISH_WORDS.has(word.toLowerCase());
+}
+
+/**
+ * Check if a word exists in the Greek dictionary
+ */
+export function isValidGreekWord(word: string): boolean {
+  return GREEK_WORDS.has(word.toUpperCase());
 }
 
 /**
@@ -64,7 +80,8 @@ export interface WordValidationResult {
 export function validateClaimedWord(
   claimedWord: string,
   fragment: string,
-  minWordLength: number
+  minWordLength: number,
+  dictionary = "english"
 ): WordValidationResult {
   const word = claimedWord.toUpperCase();
   const frag = fragment.toUpperCase();
@@ -107,7 +124,9 @@ export function validateClaimedWord(
   }
 
   // Check 4: Exists in dictionary
-  checks.isInDictionary = isValidWord(word);
+  checks.isInDictionary = dictionary === "greek"
+    ? isValidGreekWord(word)
+    : isValidWord(word);
   if (!checks.isInDictionary) {
     return {
       isValid: false,

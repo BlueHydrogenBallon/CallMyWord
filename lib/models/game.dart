@@ -417,6 +417,11 @@ class Game {
     return opponentId.isNotEmpty ? players[opponentId] : null;
   }
 
+  /// Get all other players except the given one (for multiplayer display)
+  List<MapEntry<String, Player>> getOtherPlayers(String myId) {
+    return players.entries.where((e) => e.key != myId).toList();
+  }
+
   /// Check if a player is the challenged player in pending challenge
   bool isChallengedPlayer(String playerId) {
     return pendingChallenge?.challengedPlayerId == playerId;

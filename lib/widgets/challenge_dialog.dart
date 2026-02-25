@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../config/app_strings.dart';
+
 /// Dialog to confirm initiating a challenge
 class ChallengeDialog extends StatelessWidget {
   final String opponentName;
@@ -18,7 +20,7 @@ class ChallengeDialog extends StatelessWidget {
         children: [
           Icon(Icons.gavel, color: Colors.orange.shade700),
           const SizedBox(width: 8),
-          const Text('Challenge?'),
+          Text(S.challengeTitle),
         ],
       ),
       content: Column(
@@ -26,7 +28,7 @@ class ChallengeDialog extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'You think "$currentWord" isn\'t leading to a real word?',
+            S.challengeQuestion(currentWord),
           ),
           const SizedBox(height: 16),
           Container(
@@ -39,7 +41,7 @@ class ChallengeDialog extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'If you challenge:',
+                  S.ifYouChallenge,
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     color: Colors.grey[700],
@@ -47,15 +49,15 @@ class ChallengeDialog extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 _buildBullet(
-                  '$opponentName must prove they have a valid word',
+                  S.opponentMustProve(opponentName),
                   Colors.grey[600]!,
                 ),
                 _buildBullet(
-                  'If they can\'t, you win the Bluff Bonus!',
+                  S.ifTheyCant,
                   Colors.green.shade700,
                 ),
                 _buildBullet(
-                  'If they can, they win the Word Pot + Bonus',
+                  S.ifTheyCan,
                   Colors.red.shade700,
                 ),
               ],
@@ -66,12 +68,12 @@ class ChallengeDialog extends StatelessWidget {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Cancel'),
+          child: Text(S.cancel),
         ),
         ElevatedButton.icon(
           onPressed: () => Navigator.of(context).pop(true),
           icon: const Icon(Icons.gavel, size: 18),
-          label: const Text('Challenge!'),
+          label: Text(S.challengeExclaim),
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.orange.shade700,
             foregroundColor: Colors.white,

@@ -1,12 +1,18 @@
 import 'dart:async';
 
+import 'package:confetti/confetti.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../config/app_config.dart';
+import '../config/app_strings.dart';
 import '../models/game.dart';
+import '../models/player.dart';
 import '../providers/auth_provider.dart';
 import '../providers/audio_provider.dart';
+import '../services/dictionary_service.dart';
 import '../services/game_service.dart';
 import '../widgets/game_keyboard.dart';
 import '../widgets/player_score_card.dart';
@@ -37,6 +43,11 @@ class _GameScreenState extends ConsumerState<GameScreen>
   bool _showPotOverlay = false;
   bool _potWon = false;
   int _potAmount = 0;
+  String? _potWord;
+  String? _potDefinition;
+  int _potCountdown = 10;
+  Timer? _potCountdownTimer;
+  late final ConfettiController _potConfettiController;
 
   // Track history lengths to detect new entries
   int _lastChallengeHistoryLength = 0;
@@ -60,6 +71,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _potConfettiController = ConfettiController(duration: const Duration(seconds: 2));
     _watchGame();
   }
 
@@ -67,6 +79,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _gameSubscription?.cancel();
+    _potCountdownTimer?.cancel();
+    _potConfettiController.dispose();
     _challengeWordController.dispose();
     _continuationWordController.dispose();
     _callWordController.dispose();
@@ -87,7 +101,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
       (game) {
         if (game == null) {
           setState(() {
-            _error = 'Game not found';
+            _error = S.gameNotFound;
           });
           return;
         }
@@ -168,7 +182,9 @@ class _GameScreenState extends ConsumerState<GameScreen>
         if (game.challengeHistory.length > _lastChallengeHistoryLength && userId != null) {
           final latestEntry = game.challengeHistory.last;
           final didWin = latestEntry.winnerId == userId;
-          _showPotResultOverlay(didWin, latestEntry.pointsAwarded);
+          // Use claimedWord if available, fall back to the fragment
+          final word = latestEntry.claimedWord ?? latestEntry.wordFragment;
+          _showPotResultOverlay(didWin, latestEntry.pointsAwarded, word);
         }
         _lastChallengeHistoryLength = game.challengeHistory.length;
 
@@ -176,7 +192,10 @@ class _GameScreenState extends ConsumerState<GameScreen>
         if (game.wordCallHistory.length > _lastWordCallHistoryLength && userId != null) {
           final latestEntry = game.wordCallHistory.last;
           final didWin = latestEntry.winnerId == userId;
-          _showPotResultOverlay(didWin, latestEntry.pointsAwarded);
+          final word = (latestEntry.wasContinuationValid == true && latestEntry.continuationWord != null)
+              ? latestEntry.continuationWord
+              : latestEntry.calledWord;
+          _showPotResultOverlay(didWin, latestEntry.pointsAwarded, word);
         }
         _lastWordCallHistoryLength = game.wordCallHistory.length;
       },
@@ -264,7 +283,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
     // Validate: must contain the fragment
     if (!claimedWord.contains(fragment)) {
       setState(() {
-        _challengeError = 'Word must contain "$fragment"';
+        _challengeError = S.wordMustContain(fragment);
       });
       return;
     }
@@ -272,7 +291,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
     // Validate: minimum 4 characters
     if (claimedWord.length < 4) {
       setState(() {
-        _challengeError = 'Word must be at least 4 letters';
+        _challengeError = S.wordMinLength;
       });
       return;
     }
@@ -344,7 +363,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
     // Validate: minimum 4 characters
     if (calledWord.length < 4) {
       setState(() {
-        _callWordError = 'Word must be at least 4 letters';
+        _callWordError = S.wordMinLength;
       });
       return;
     }
@@ -472,32 +491,60 @@ class _GameScreenState extends ConsumerState<GameScreen>
   }
 
 
-  void _showPotResultOverlay(bool won, int amount) {
+  void _showPotResultOverlay(bool won, int amount, String? word) {
+    _potCountdownTimer?.cancel();
     setState(() {
       _showPotOverlay = true;
       _potWon = won;
       _potAmount = amount;
+      _potWord = word;
+      _potDefinition = null;
+      _potCountdown = 15;
     });
+    if (won) _potConfettiController.play();
+    if (word != null) _fetchDefinition(word);
 
-    // Auto-dismiss after 2 seconds
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        setState(() {
-          _showPotOverlay = false;
-        });
+    _potCountdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() => _potCountdown--);
+      if (_potCountdown <= 0) {
+        timer.cancel();
+        _dismissPotOverlay();
       }
     });
   }
 
-  String _parseError(String error) {
-    if (error.contains('not your turn')) {
-      return "Not your turn";
-    } else if (error.contains('invalid letter')) {
-      return 'Invalid letter';
-    } else if (error.contains('not enough letters')) {
-      return 'Need 2+ letters to challenge';
+  void _dismissPotOverlay() {
+    _potCountdownTimer?.cancel();
+    _potCountdownTimer = null;
+    if (mounted && _showPotOverlay) {
+      setState(() => _showPotOverlay = false);
     }
-    return 'Something went wrong';
+  }
+
+  Future<void> _fetchDefinition(String word) async {
+    try {
+      final definition = await DictionaryService.lookup(word, isGreek: kIsGreek);
+      if (mounted) setState(() => _potDefinition = definition ?? '');
+    } catch (_) {
+      if (mounted) setState(() => _potDefinition = '');
+    }
+  }
+
+  String _parseError(String error) {
+    if (error.contains('not your turn') || error.contains('Not your turn')) {
+      return S.notYourTurn;
+    } else if (error.contains('invalid letter') ||
+        error.contains('must be a single') ||
+        error.contains('invalid-argument')) {
+      return S.invalidLetter;
+    } else if (error.contains('not enough letters')) {
+      return S.needMoreLetters;
+    }
+    return S.somethingWentWrong;
   }
 
   void _showErrorSnackbar(String message) {
@@ -516,7 +563,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
     if (_error != null && game == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Game')),
+        appBar: AppBar(title: Text(S.game)),
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -527,7 +574,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
               const SizedBox(height: 16),
               ElevatedButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Go Back'),
+                child: Text(S.goBack),
               ),
             ],
           ),
@@ -537,13 +584,13 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
     if (game == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Game')),
+        appBar: AppBar(title: Text(S.game)),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
 
     final myPlayer = userId != null ? game.getPlayer(userId) : null;
-    final opponent = userId != null ? game.getOpponent(userId) : null;
+    final otherPlayers = userId != null ? game.getOtherPlayers(userId) : <MapEntry<String, Player>>[];
     final isMyTurn = userId != null && game.isPlayerTurn(userId);
     final isChallenged = userId != null && game.isChallengedPlayer(userId);
     final isChallenger = userId != null && game.isChallenger(userId);
@@ -553,7 +600,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Turn ${game.turnNumber}'),
+        title: Text(S.turnNumber(game.turnNumber)),
         toolbarHeight: 44,
         automaticallyImplyLeading: false,
         actions: [
@@ -564,7 +611,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
               size: 20,
             ),
             onPressed: () => ref.read(soundEffectsProvider).toggleMute(),
-            tooltip: isSfxMuted ? 'Unmute sound effects' : 'Mute sound effects',
+            tooltip: isSfxMuted ? S.unmuteSound : S.muteSound,
           ),
           // Music toggle
           IconButton(
@@ -573,7 +620,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
               size: 20,
             ),
             onPressed: () => ref.read(backgroundMusicProvider).toggleMute(),
-            tooltip: isMusicMuted ? 'Unmute music' : 'Mute music',
+            tooltip: isMusicMuted ? S.unmuteMusic : S.muteMusic,
           ),
           IconButton(
             icon: const Icon(Icons.close, size: 20),
@@ -586,28 +633,35 @@ class _GameScreenState extends ConsumerState<GameScreen>
           SafeArea(
             child: Column(
               children: [
-                // Top: Score cards
+                // Top: Score cards (dynamic for 2-4 players)
                 Padding(
               padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
-              child: Row(
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 4,
                 children: [
-                  Expanded(
+                  // "You" card
+                  SizedBox(
+                    width: (MediaQuery.of(context).size.width - 24) / 2 - 4,
                     child: PlayerScoreCard(
                       player: myPlayer,
-                      label: 'You',
+                      label: S.you,
                       isCurrentTurn: isMyTurn,
                       targetScore: game.settings.targetScore,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: PlayerScoreCard(
-                      player: opponent,
-                      label: opponent?.displayName ?? 'Opponent',
-                      isCurrentTurn: !isMyTurn && game.isInProgress,
-                      targetScore: game.settings.targetScore,
+                  // Other players
+                  for (final entry in otherPlayers)
+                    SizedBox(
+                      width: (MediaQuery.of(context).size.width - 24) / 2 - 4,
+                      child: PlayerScoreCard(
+                        player: entry.value,
+                        label: entry.value.displayName,
+                        isCurrentTurn: game.isInProgress &&
+                            game.playerIds[game.currentPlayerIndex] == entry.key,
+                        targetScore: game.settings.targetScore,
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -636,7 +690,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Text(
-                              'Pot: ${game.wordPot}',
+                              S.pot(game.wordPot),
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.bold,
@@ -668,6 +722,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                     // Show keyboard for challenged player to type their word
                     if (isChallenged)
                       GameKeyboard(
+                        language: kDictionary,
                         onLetterPressed: (letter) {
                           // Append letter to challenge word controller
                           final currentText = _challengeWordController.text;
@@ -675,6 +730,15 @@ class _GameScreenState extends ConsumerState<GameScreen>
                           _challengeWordController.selection = TextSelection.fromPosition(
                             TextPosition(offset: _challengeWordController.text.length),
                           );
+                        },
+                        onBackspace: () {
+                          final text = _challengeWordController.text;
+                          if (text.isNotEmpty) {
+                            _challengeWordController.text = text.substring(0, text.length - 1);
+                            _challengeWordController.selection = TextSelection.fromPosition(
+                              TextPosition(offset: _challengeWordController.text.length),
+                            );
+                          }
                         },
                         enabled: !_isSubmitting,
                       ),
@@ -691,6 +755,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                     // Show keyboard for responder when entering continuation word
                     if (userId != null && game.isWordCallResponder(userId) && _showContinueInput)
                       GameKeyboard(
+                        language: kDictionary,
                         onLetterPressed: (letter) {
                           // Append letter to continuation word controller
                           final currentText = _continuationWordController.text;
@@ -698,6 +763,15 @@ class _GameScreenState extends ConsumerState<GameScreen>
                           _continuationWordController.selection = TextSelection.fromPosition(
                             TextPosition(offset: _continuationWordController.text.length),
                           );
+                        },
+                        onBackspace: () {
+                          final text = _continuationWordController.text;
+                          if (text.isNotEmpty) {
+                            _continuationWordController.text = text.substring(0, text.length - 1);
+                            _continuationWordController.selection = TextSelection.fromPosition(
+                              TextPosition(offset: _continuationWordController.text.length),
+                            );
+                          }
                         },
                         enabled: !_isSubmitting,
                       ),
@@ -728,7 +802,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                                 child: OutlinedButton.icon(
                                   onPressed: _initiateChallenge,
                                   icon: const Icon(Icons.gavel, size: 16),
-                                  label: const Text('Challenge', style: TextStyle(fontSize: 12)),
+                                  label: Text(S.challenge, style: const TextStyle(fontSize: 12)),
                                   style: OutlinedButton.styleFrom(
                                     padding: const EdgeInsets.symmetric(horizontal: 12),
                                     foregroundColor: Colors.orange.shade700,
@@ -744,7 +818,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                                 child: OutlinedButton.icon(
                                   onPressed: _startCallWord,
                                   icon: const Icon(Icons.check_circle_outline, size: 16),
-                                  label: const Text('Call Word', style: TextStyle(fontSize: 12)),
+                                  label: Text(S.callWord, style: const TextStyle(fontSize: 12)),
                                   style: OutlinedButton.styleFrom(
                                     padding: const EdgeInsets.symmetric(horizontal: 12),
                                     foregroundColor: Colors.green.shade700,
@@ -760,6 +834,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
                     // Keyboard
                     GameKeyboard(
+                      language: kDictionary,
                       onLetterPressed: _showCallWordInput
                           ? (letter) {
                               // Append letter to call word controller
@@ -770,6 +845,17 @@ class _GameScreenState extends ConsumerState<GameScreen>
                               );
                             }
                           : _submitLetter,
+                      onBackspace: _showCallWordInput
+                          ? () {
+                              final text = _callWordController.text;
+                              if (text.isNotEmpty) {
+                                _callWordController.text = text.substring(0, text.length - 1);
+                                _callWordController.selection = TextSelection.fromPosition(
+                                  TextPosition(offset: _callWordController.text.length),
+                                );
+                              }
+                            }
+                          : null,
                       enabled: _showCallWordInput ? !_isSubmitting : (isMyTurn && !_isSubmitting),
                     ),
                   ],
@@ -789,59 +875,157 @@ class _GameScreenState extends ConsumerState<GameScreen>
   Widget _buildPotResultOverlay() {
     final isWon = _potWon;
     final amount = _potAmount;
+    final word = _potWord;
+    final definition = _potDefinition;
 
     return Positioned.fill(
-      child: Container(
-        color: isWon
-            ? Colors.green.shade900.withAlpha(217)
-            : Colors.red.shade900.withAlpha(217),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                isWon ? Icons.emoji_events : Icons.sentiment_dissatisfied,
-                size: 64,
-                color: Colors.white,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                isWon ? 'POT WON!' : 'POT LOST',
-                style: const TextStyle(
-                  fontSize: 36,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  letterSpacing: 2,
-                ),
-              ),
-              const SizedBox(height: 12),
-              if (amount > 0)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withAlpha(51),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    '+$amount pts',
-                    style: const TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
+      child: Stack(
+        children: [
+          Container(
+            color: isWon
+                ? Colors.green.shade900.withAlpha(217)
+                : Colors.red.shade900.withAlpha(217),
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isWon ? Icons.emoji_events : Icons.sentiment_dissatisfied,
+                      size: 64,
                       color: Colors.white,
                     ),
-                  ),
-                )
-              else
-                const Text(
-                  'Both words invalid',
-                  style: TextStyle(
-                    fontSize: 18,
-                    color: Colors.white70,
-                  ),
+                    const SizedBox(height: 16),
+                    Text(
+                      isWon ? S.potWon : S.potLost,
+                      style: const TextStyle(
+                        fontSize: 36,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (amount > 0)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withAlpha(51),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          S.points(amount),
+                          style: const TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      )
+                    else
+                      Text(
+                        S.bothWordsInvalid,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          color: Colors.white70,
+                        ),
+                      ),
+
+                    // Winning word
+                    if (word != null) ...[
+                      const SizedBox(height: 20),
+                      Text(
+                        word.toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          letterSpacing: 4,
+                        ),
+                      ),
+                    ],
+
+                    // Definition
+                    if (word != null) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        constraints: const BoxConstraints(maxHeight: 100),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withAlpha(60),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: definition == null
+                            // Still loading
+                            ? const SizedBox(
+                                height: 16,
+                                width: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white54,
+                                ),
+                              )
+                            : definition.isEmpty
+                                // Not found
+                                ? const Text(
+                                    'No definition found',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.white38,
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  )
+                                // Show definition
+                                : SingleChildScrollView(
+                                    child: Text(
+                                      definition,
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.white70,
+                                        height: 1.4,
+                                      ),
+                                    ),
+                                  ),
+                      ),
+                    ],
+
+                    // Countdown
+                    const SizedBox(height: 20),
+                    Text(
+                      '$_potCountdown',
+                      style: const TextStyle(
+                        fontSize: 48,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white54,
+                      ),
+                    ),
+                  ],
                 ),
-            ],
+              ),
+            ),
           ),
-        ),
+          if (isWon)
+            Align(
+              alignment: Alignment.topCenter,
+              child: ConfettiWidget(
+                confettiController: _potConfettiController,
+                blastDirectionality: BlastDirectionality.explosive,
+                colors: const [
+                  Colors.green,
+                  Colors.lightGreen,
+                  Colors.white,
+                  Colors.yellow,
+                  Colors.lime,
+                ],
+                numberOfParticles: 15,
+                emissionFrequency: 0.03,
+                maxBlastForce: 20,
+                minBlastForce: 8,
+                gravity: 0.3,
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -851,7 +1035,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
     if (word.isEmpty) {
       return Text(
-        'Start with any letter',
+        S.startWithAnyLetter,
         style: TextStyle(
           fontSize: 14,
           color: Colors.grey[500],
@@ -894,7 +1078,9 @@ class _GameScreenState extends ConsumerState<GameScreen>
 
     // Add word call history entries
     for (final entry in game.wordCallHistory) {
-      final word = entry.continuationWord ?? entry.calledWord;
+      final word = (entry.wasContinuationValid == true && entry.continuationWord != null)
+          ? entry.continuationWord!
+          : entry.calledWord;
       entries.add(_HistoryEntry(
         word: word,
         didWin: entry.winnerId == userId,
@@ -971,7 +1157,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
-        isMyTurn ? 'Your turn' : "Opponent's turn",
+        isMyTurn ? S.yourTurn : S.opponentsTurn,
         style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w500,
@@ -1003,7 +1189,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                   Icon(Icons.gavel, size: 24, color: Colors.orange.shade700),
                   const SizedBox(width: 8),
                   Text(
-                    'Challenge!',
+                    S.challengeExclaim,
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -1018,15 +1204,15 @@ class _GameScreenState extends ConsumerState<GameScreen>
           const SizedBox(height: 8),
           Text(
             isChallenged
-                ? '${challenge.challengerName} challenged you!'
-                : 'Waiting for ${challenge.challengedPlayerName}...',
+                ? S.challengesYou(challenge.challengerName)
+                : S.waitingFor(challenge.challengedPlayerName),
             style: const TextStyle(fontSize: 13),
           ),
 
           if (isChallenged) ...[
             const SizedBox(height: 12),
             Text(
-              'Enter a valid word containing "${game.currentWord}":',
+              S.enterWordContaining(game.currentWord),
               style: TextStyle(
                 fontSize: 12,
                 color: colorScheme.onSurfaceVariant,
@@ -1036,6 +1222,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
             TextField(
               controller: _challengeWordController,
               autofocus: true,
+              readOnly: !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS),
+              showCursor: true,
               textCapitalization: TextCapitalization.characters,
               enabled: !_isSubmitting,
               inputFormatters: [
@@ -1046,7 +1234,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                 }),
               ],
               decoration: InputDecoration(
-                hintText: 'e.g., FRAGILE',
+                hintText: S.wordHintChallenge,
                 errorText: _challengeError,
                 border: const OutlineInputBorder(),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -1066,7 +1254,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                         height: 20,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text('Submit Word'),
+                    : Text(S.submitWord),
               ),
             ),
           ],
@@ -1095,7 +1283,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                   Icon(Icons.check_circle, size: 24, color: Colors.green.shade700),
                   const SizedBox(width: 8),
                   Text(
-                    'Word Called!',
+                    S.wordCalled,
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -1130,7 +1318,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
           ),
           const SizedBox(height: 4),
           Text(
-            'Fragment: ${wordCall.wordFragment}',
+            S.fragment(wordCall.wordFragment),
             style: TextStyle(
               fontSize: 12,
               color: colorScheme.onSurfaceVariant,
@@ -1140,7 +1328,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
           if (isCaller) ...[
             const SizedBox(height: 8),
             Text(
-              'Waiting for ${wordCall.responderName}...',
+              S.waitingFor(wordCall.responderName),
               style: const TextStyle(fontSize: 13),
             ),
           ],
@@ -1161,9 +1349,9 @@ class _GameScreenState extends ConsumerState<GameScreen>
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Text(
-          'How do you respond?',
-          style: TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+        Text(
+          S.howDoYouRespond,
+          style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
         ),
         const SizedBox(height: 8),
         // Three inline buttons
@@ -1172,7 +1360,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
             Expanded(
               child: _buildResponseOptionButton(
                 icon: Icons.add_circle_outline,
-                label: 'Continue',
+                label: S.continueWord,
                 color: colorScheme.primary,
                 onPressed: _isSubmitting ? null : _handleWordCallContinue,
               ),
@@ -1181,7 +1369,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
             Expanded(
               child: _buildResponseOptionButton(
                 icon: Icons.gavel,
-                label: 'Challenge',
+                label: S.challenge,
                 color: colorScheme.error,
                 onPressed: _isSubmitting ? null : _handleWordCallChallenge,
               ),
@@ -1190,7 +1378,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
             Expanded(
               child: _buildResponseOptionButton(
                 icon: Icons.check_circle_outline,
-                label: 'Accept',
+                label: S.acceptWord,
                 color: colorScheme.tertiary,
                 onPressed: _isSubmitting ? null : _handleWordCallAccept,
               ),
@@ -1245,7 +1433,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Enter a longer valid word starting with "${wordCall.wordFragment}":',
+          S.enterLongerWordStartingWith(wordCall.wordFragment),
           style: TextStyle(
             fontSize: 12,
             color: colorScheme.onSurfaceVariant,
@@ -1255,6 +1443,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
         TextField(
           controller: _continuationWordController,
           autofocus: true,
+          readOnly: !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS),
+          showCursor: true,
           textCapitalization: TextCapitalization.characters,
           enabled: !_isSubmitting,
           inputFormatters: [
@@ -1265,7 +1455,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
             }),
           ],
           decoration: InputDecoration(
-            hintText: 'e.g., ${wordCall.wordFragment}FYING',
+            hintText: S.wordHintContinuation(wordCall.wordFragment),
             errorText: _wordCallError,
             border: const OutlineInputBorder(),
             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -1275,7 +1465,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
         ),
         const SizedBox(height: 4),
         Text(
-          'Must be longer than "${wordCall.calledWord}" to win!',
+          S.mustBeLongerThan(wordCall.calledWord),
           style: TextStyle(
             fontSize: 11,
             color: colorScheme.onSurfaceVariant,
@@ -1291,7 +1481,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                         _showContinueInput = false;
                         _wordCallError = null;
                       }),
-              child: const Text('Back'),
+              child: Text(S.back),
             ),
             const Spacer(),
             FilledButton(
@@ -1302,7 +1492,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                       height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('Submit'),
+                  : Text(S.submit),
             ),
           ],
         ),
@@ -1325,7 +1515,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
               Icon(Icons.check_circle, size: 20, color: Colors.green.shade700),
               const SizedBox(width: 8),
               Text(
-                'Call Your Word',
+                S.callYourWord,
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
@@ -1336,7 +1526,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
           ),
           const SizedBox(height: 8),
           Text(
-            'Current fragment: $fragment',
+            S.currentFragment(fragment),
             style: TextStyle(
               fontSize: 12,
               color: colorScheme.onSurfaceVariant,
@@ -1347,6 +1537,8 @@ class _GameScreenState extends ConsumerState<GameScreen>
           TextField(
             controller: _callWordController,
             autofocus: true,
+            readOnly: !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS),
+            showCursor: true,
             textCapitalization: TextCapitalization.characters,
             enabled: !_isSubmitting,
             inputFormatters: [
@@ -1357,7 +1549,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
               }),
             ],
             decoration: InputDecoration(
-              hintText: 'e.g., HORSE',
+              hintText: S.wordHintCallWord,
               errorText: _callWordError,
               border: const OutlineInputBorder(),
               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -1370,7 +1562,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
             children: [
               TextButton(
                 onPressed: _isSubmitting ? null : _cancelCallWord,
-                child: const Text('Cancel'),
+                child: Text(S.cancel),
               ),
               const Spacer(),
               FilledButton(
@@ -1384,7 +1576,7 @@ class _GameScreenState extends ConsumerState<GameScreen>
                         height: 20,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text('Call Word'),
+                    : Text(S.callWord),
               ),
             ],
           ),
@@ -1397,17 +1589,17 @@ class _GameScreenState extends ConsumerState<GameScreen>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Leave Game?'),
-        content: const Text('You will forfeit the game.'),
+        title: Text(S.leaveGame),
+        content: Text(S.leaveGameConfirm),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Stay'),
+            child: Text(S.stay),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Leave'),
+            child: Text(S.leave),
           ),
         ],
       ),

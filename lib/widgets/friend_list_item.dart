@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../config/app_strings.dart';
 import '../models/friend.dart';
 
 /// Widget displaying a single friend in the friends list
@@ -56,7 +57,7 @@ class FriendListItem extends StatelessWidget {
         style: const TextStyle(fontWeight: FontWeight.w500),
       ),
       subtitle: Text(
-        friend.isOnline ? 'Online' : _formatLastActive(friend.lastActiveAt),
+        friend.isOnline ? S.online : _formatLastActive(friend.lastActiveAt),
         style: TextStyle(
           color: friend.isOnline ? Colors.green : Colors.grey,
           fontSize: 12,
@@ -68,28 +69,28 @@ class FriendListItem extends StatelessWidget {
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
               ),
-              child: const Text('Challenge'),
+              child: Text(S.challenge),
             )
           : null,
     );
   }
 
   String _formatLastActive(DateTime? lastActive) {
-    if (lastActive == null) return 'Offline';
+    if (lastActive == null) return S.offline;
 
     final now = DateTime.now();
     final difference = now.difference(lastActive);
 
     if (difference.inMinutes < 1) {
-      return 'Just now';
+      return S.justNow;
     } else if (difference.inMinutes < 60) {
-      return '${difference.inMinutes}m ago';
+      return S.minutesAgo(difference.inMinutes);
     } else if (difference.inHours < 24) {
-      return '${difference.inHours}h ago';
+      return S.hoursAgo(difference.inHours);
     } else if (difference.inDays < 7) {
-      return '${difference.inDays}d ago';
+      return S.daysAgo(difference.inDays);
     } else {
-      return 'Over a week ago';
+      return S.overAWeekAgo;
     }
   }
 }

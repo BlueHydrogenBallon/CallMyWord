@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../config/app_strings.dart';
 import '../providers/auth_provider.dart';
 
 /// Authentication screen for login/register
@@ -101,24 +102,24 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
 
   String _parseError(String error) {
     if (error.contains('user-not-found')) {
-      return 'No account found with this email';
+      return S.noAccountFound;
     } else if (error.contains('wrong-password')) {
-      return 'Incorrect password';
+      return S.incorrectPassword;
     } else if (error.contains('email-already-in-use')) {
-      return 'An account already exists with this email';
+      return S.accountAlreadyExists;
     } else if (error.contains('weak-password')) {
-      return 'Password is too weak';
+      return S.weakPassword;
     } else if (error.contains('invalid-email')) {
-      return 'Invalid email address';
+      return S.invalidEmail;
     }
-    return 'Authentication failed. Please try again.';
+    return S.authFailed;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isLogin ? 'Sign In' : 'Create Account'),
+        title: Text(_isLogin ? S.signIn : S.createAccount),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -130,9 +131,9 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
               OutlinedButton.icon(
                 onPressed: _isLoading ? null : _signInAnonymously,
                 icon: const Icon(Icons.person_outline),
-                label: const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12),
-                  child: Text('Play as Guest'),
+                label: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text(S.playAsGuest),
                 ),
               ),
 
@@ -145,7 +146,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Text(
-                      'OR',
+                      S.orSeparator,
                       style: TextStyle(color: Colors.grey[600]),
                     ),
                   ),
@@ -165,10 +166,10 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                     if (!_isLogin) ...[
                       TextFormField(
                         controller: _displayNameController,
-                        decoration: const InputDecoration(
-                          labelText: 'Display Name',
-                          hintText: 'Your name in game',
-                          prefixIcon: Icon(Icons.badge_outlined),
+                        decoration: InputDecoration(
+                          labelText: S.displayName,
+                          hintText: S.yourNameInGame,
+                          prefixIcon: const Icon(Icons.badge_outlined),
                         ),
                         textCapitalization: TextCapitalization.words,
                       ),
@@ -178,19 +179,19 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                     // Email
                     TextFormField(
                       controller: _emailController,
-                      decoration: const InputDecoration(
-                        labelText: 'Email',
-                        hintText: 'your@email.com',
-                        prefixIcon: Icon(Icons.email_outlined),
+                      decoration: InputDecoration(
+                        labelText: S.email,
+                        hintText: S.emailHint,
+                        prefixIcon: const Icon(Icons.email_outlined),
                       ),
                       keyboardType: TextInputType.emailAddress,
                       autocorrect: false,
                       validator: (value) {
                         if (value == null || value.isEmpty) {
-                          return 'Please enter your email';
+                          return S.enterEmail;
                         }
                         if (!value.contains('@')) {
-                          return 'Please enter a valid email';
+                          return S.enterValidEmail;
                         }
                         return null;
                       },
@@ -201,18 +202,18 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                     // Password
                     TextFormField(
                       controller: _passwordController,
-                      decoration: const InputDecoration(
-                        labelText: 'Password',
+                      decoration: InputDecoration(
+                        labelText: S.password,
                         hintText: '••••••••',
-                        prefixIcon: Icon(Icons.lock_outlined),
+                        prefixIcon: const Icon(Icons.lock_outlined),
                       ),
                       obscureText: true,
                       validator: (value) {
                         if (value == null || value.isEmpty) {
-                          return 'Please enter your password';
+                          return S.enterPassword;
                         }
                         if (!_isLogin && value.length < 6) {
-                          return 'Password must be at least 6 characters';
+                          return S.passwordMinLength;
                         }
                         return null;
                       },
@@ -248,7 +249,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                                 height: 20,
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               )
-                            : Text(_isLogin ? 'Sign In' : 'Create Account'),
+                            : Text(_isLogin ? S.signIn : S.createAccount),
                       ),
                     ),
 
@@ -266,8 +267,8 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                             },
                       child: Text(
                         _isLogin
-                            ? "Don't have an account? Sign up"
-                            : 'Already have an account? Sign in',
+                            ? S.noAccountSignUp
+                            : S.haveAccountSignIn,
                       ),
                     ),
                   ],

@@ -30,6 +30,8 @@ export interface Lobby {
   maxPlayers: number;
   status: LobbyStatus;
   gameId: string | null;
+  isParty?: boolean;
+  dictionary?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -171,6 +173,7 @@ export interface Game {
 
 export interface JoinOrCreateLobbyRequest {
   playerName: string;
+  dictionary?: string;
 }
 
 export interface JoinOrCreateLobbyResponse {
@@ -239,6 +242,7 @@ export interface FriendChallenge {
   status: FriendChallengeStatus;
   gameId: string | null;
   lobbyId: string | null;
+  isParty?: boolean;
   createdAt: Timestamp;
   expiresAt: Timestamp;
 }
@@ -295,4 +299,39 @@ export interface DeclineFriendChallengeRequest {
 
 export interface CancelFriendChallengeRequest {
   challengeId: string;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PARTY (MULTIPLAYER) FUNCTION REQUEST/RESPONSE TYPES
+// ═══════════════════════════════════════════════════════════════
+
+export interface CreatePartyLobbyRequest {
+  invitedFriendIds: string[];
+}
+
+export interface CreatePartyLobbyResponse {
+  lobbyId: string;
+  challengeIds: string[];
+}
+
+export interface JoinPartyLobbyRequest {
+  lobbyId: string;
+  challengeId: string;
+}
+
+export interface JoinPartyLobbyResponse {
+  lobbyId: string;
+  playerCount: number;
+}
+
+export interface StartPartyGameRequest {
+  lobbyId: string;
+}
+
+export interface StartPartyGameResponse {
+  gameId: string;
+}
+
+export interface LeavePartyLobbyRequest {
+  lobbyId: string;
 }

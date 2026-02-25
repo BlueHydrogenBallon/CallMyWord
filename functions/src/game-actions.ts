@@ -47,11 +47,8 @@ export const submitMove = onCall<SubmitMoveRequest>(async (request) => {
   if (!gameId || typeof gameId !== "string") {
     throw new HttpsError("invalid-argument", "Missing gameId");
   }
-  if (!letter || typeof letter !== "string" || !/^[A-Z]$/i.test(letter)) {
-    throw new HttpsError(
-      "invalid-argument",
-      "Letter must be a single A-Z character"
-    );
+  if (!letter || typeof letter !== "string") {
+    throw new HttpsError("invalid-argument", "Missing letter");
   }
 
   const upperLetter = letter.toUpperCase();
@@ -66,6 +63,20 @@ export const submitMove = onCall<SubmitMoveRequest>(async (request) => {
     }
 
     const game = gameDoc.data() as Game;
+
+    // Validate letter is valid for the game's dictionary
+    const dictionary = game.settings.dictionary || "english";
+    const isValidLetter = dictionary === "greek"
+      ? /^[ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ]$/.test(upperLetter)
+      : /^[A-Z]$/.test(upperLetter);
+    if (!isValidLetter) {
+      throw new HttpsError(
+        "invalid-argument",
+        dictionary === "greek"
+          ? "Letter must be a single Greek character"
+          : "Letter must be a single A-Z character"
+      );
+    }
 
     // Validate game state
     if (game.status !== "in_progress") {
@@ -89,7 +100,7 @@ export const submitMove = onCall<SubmitMoveRequest>(async (request) => {
     // Calculate new word and pot
     const previousWord = game.currentWord;
     const newWord = previousWord + upperLetter;
-    const letterPoints = getLetterPoints(upperLetter);
+    const letterPoints = getLetterPoints(upperLetter, dictionary);
     const newWordPot = game.wordPot + letterPoints;
 
     // Get next player
@@ -291,7 +302,7 @@ export const respondToChallenge = onCall<RespondToChallengeRequest>(
 
     const normalizedWord = claimedWord.trim().toUpperCase();
 
-    if (!/^[A-Z]+$/.test(normalizedWord)) {
+    if (!/^[A-Za-zΑ-Ωα-ω]+$/.test(normalizedWord)) {
       throw new HttpsError(
         "invalid-argument",
         "Word must contain only letters"
@@ -331,7 +342,8 @@ export const respondToChallenge = onCall<RespondToChallengeRequest>(
       const validationResult = validateClaimedWord(
         normalizedWord,
         challenge.wordFragment,
-        game.settings.minWordLength
+        game.settings.minWordLength,
+        game.settings.dictionary
       );
 
       // Debug logging
@@ -352,7 +364,8 @@ export const respondToChallenge = onCall<RespondToChallengeRequest>(
           challenge.wordFragment,
           normalizedWord,
           challenge.challengedPlayerId,
-          challenge.challengedPlayerName
+          challenge.challengedPlayerName,
+          game.settings.dictionary
         );
       } else {
         // Challenger wins
@@ -360,7 +373,8 @@ export const respondToChallenge = onCall<RespondToChallengeRequest>(
         scoringResult = calculateChallengerWinScore(
           challenge.wordFragment,
           challenge.challengerId,
-          challenge.challengerName
+          challenge.challengerName,
+          game.settings.dictionary
         );
       }
       console.log("Scoring result:", JSON.stringify(scoringResult));
@@ -569,7 +583,8 @@ async function handleChallengeTimeout(gameId: string): Promise<void> {
     const scoringResult = calculateChallengerWinScore(
       challenge.wordFragment,
       challenge.challengerId,
-      challenge.challengerName
+      challenge.challengerName,
+      freshGame.settings.dictionary
     );
 
     // Update scores
@@ -703,7 +718,8 @@ async function handleWordCallTimeout(gameId: string): Promise<void> {
     const calledWordValid = validateClaimedWord(
       wordCall.calledWord,
       wordCall.wordFragment,
-      freshGame.settings.minWordLength
+      freshGame.settings.minWordLength,
+      freshGame.settings.dictionary
     );
 
     let winnerId: string | null = null;
@@ -715,8 +731,8 @@ async function handleWordCallTimeout(gameId: string): Promise<void> {
       // Caller wins with their word (timeout = implicit accept)
       winnerId = wordCall.callerId;
       winnerName = wordCall.callerName;
-      const wordPot = calculateWordPot(wordCall.wordFragment);
-      const wordBonus = wordCall.calledWord.length - wordCall.wordFragment.length;
+      const wordPot = calculateWordPot(wordCall.wordFragment, freshGame.settings.dictionary);
+      const wordBonus = calculateWordPot(wordCall.calledWord, freshGame.settings.dictionary) - wordPot;
       pointsAwarded = wordPot + wordBonus;
       loserId = wordCall.responderId;
     } else {
@@ -747,8 +763,8 @@ async function handleWordCallTimeout(gameId: string): Promise<void> {
     const scoringDetails: ScoringDetails | null =
       winnerId && pointsAwarded > 0
         ? {
-            wordPot: calculateWordPot(wordCall.wordFragment),
-            wordBonus: wordCall.calledWord.length - wordCall.wordFragment.length,
+            wordPot: calculateWordPot(wordCall.wordFragment, freshGame.settings.dictionary),
+            wordBonus: calculateWordPot(wordCall.calledWord, freshGame.settings.dictionary) - calculateWordPot(wordCall.wordFragment, freshGame.settings.dictionary),
             bluffBonus: null,
             totalAwarded: pointsAwarded,
             awardedTo: winnerId,
@@ -846,7 +862,7 @@ export const callWord = onCall<CallWordRequest>(async (request) => {
 
   const normalizedWord = calledWord.trim().toUpperCase();
 
-  if (!/^[A-Z]+$/.test(normalizedWord)) {
+  if (!/^[A-Za-zΑ-Ωα-ω]+$/.test(normalizedWord)) {
     throw new HttpsError("invalid-argument", "Word must contain only letters");
   }
 
@@ -1055,12 +1071,14 @@ async function handleContinueResponse(
   const calledWordValid = validateClaimedWord(
     wordCall.calledWord.toUpperCase(),
     fragmentUpper,
-    game.settings.minWordLength
+    game.settings.minWordLength,
+    game.settings.dictionary
   );
   const continuationValid = validateClaimedWord(
     continuationWord,
     fragmentUpper,
-    game.settings.minWordLength
+    game.settings.minWordLength,
+    game.settings.dictionary
   );
 
   console.log("=== WORD CALL CONTINUE DEBUG ===");
@@ -1076,16 +1094,16 @@ async function handleContinueResponse(
     // Responder wins with continuation
     winnerId = wordCall.responderId;
     winnerName = wordCall.responderName;
-    const wordPot = calculateWordPot(wordCall.wordFragment);
-    const wordBonus = continuationWord.length - wordCall.wordFragment.length;
+    const wordPot = calculateWordPot(wordCall.wordFragment, game.settings.dictionary);
+    const wordBonus = calculateWordPot(continuationWord, game.settings.dictionary) - wordPot;
     pointsAwarded = wordPot + wordBonus;
     loserId = wordCall.callerId;
   } else if (calledWordValid.isValid) {
     // Caller wins - their word was valid and continuation failed
     winnerId = wordCall.callerId;
     winnerName = wordCall.callerName;
-    const wordPot = calculateWordPot(wordCall.wordFragment);
-    const wordBonus = wordCall.calledWord.length - wordCall.wordFragment.length;
+    const wordPot = calculateWordPot(wordCall.wordFragment, game.settings.dictionary);
+    const wordBonus = calculateWordPot(wordCall.calledWord, game.settings.dictionary) - wordPot;
     pointsAwarded = wordPot + wordBonus;
     loserId = wordCall.responderId;
   } else {
@@ -1122,7 +1140,8 @@ async function handleWordCallChallengeResponse(
   const calledWordValid = validateClaimedWord(
     wordCall.calledWord.toUpperCase(),
     fragmentUpper,
-    game.settings.minWordLength
+    game.settings.minWordLength,
+    game.settings.dictionary
   );
 
   console.log("=== WORD CALL CHALLENGE DEBUG ===");
@@ -1137,15 +1156,15 @@ async function handleWordCallChallengeResponse(
     // Challenge successful - responder wins bluff bonus
     winnerId = wordCall.responderId;
     winnerName = wordCall.responderName;
-    const wordPot = calculateWordPot(wordCall.wordFragment);
+    const wordPot = calculateWordPot(wordCall.wordFragment, game.settings.dictionary);
     pointsAwarded = Math.max(2, Math.floor(wordPot * 0.3));
     loserId = wordCall.callerId;
   } else {
     // Challenge failed - caller wins with their valid word
     winnerId = wordCall.callerId;
     winnerName = wordCall.callerName;
-    const wordPot = calculateWordPot(wordCall.wordFragment);
-    const wordBonus = wordCall.calledWord.length - wordCall.wordFragment.length;
+    const wordPot = calculateWordPot(wordCall.wordFragment, game.settings.dictionary);
+    const wordBonus = calculateWordPot(wordCall.calledWord, game.settings.dictionary) - wordPot;
     pointsAwarded = wordPot + wordBonus;
     loserId = wordCall.responderId;
   }
@@ -1179,7 +1198,8 @@ async function handleAcceptResponse(
   const calledWordValid = validateClaimedWord(
     wordCall.calledWord.toUpperCase(),
     fragmentUpper,
-    game.settings.minWordLength
+    game.settings.minWordLength,
+    game.settings.dictionary
   );
 
   console.log("=== WORD CALL ACCEPT DEBUG ===");
@@ -1194,8 +1214,8 @@ async function handleAcceptResponse(
     // Caller wins with their word
     winnerId = wordCall.callerId;
     winnerName = wordCall.callerName;
-    const wordPot = calculateWordPot(wordCall.wordFragment);
-    const wordBonus = wordCall.calledWord.length - wordCall.wordFragment.length;
+    const wordPot = calculateWordPot(wordCall.wordFragment, game.settings.dictionary);
+    const wordBonus = calculateWordPot(wordCall.calledWord, game.settings.dictionary) - wordPot;
     pointsAwarded = wordPot + wordBonus;
     loserId = wordCall.responderId;
   } else {
@@ -1256,12 +1276,12 @@ function finalizeWordCallResponse(
   const scoringDetails: ScoringDetails | null =
     winnerId && pointsAwarded > 0
       ? {
-          wordPot: calculateWordPot(wordCall.wordFragment),
+          wordPot: calculateWordPot(wordCall.wordFragment, game.settings.dictionary),
           wordBonus:
             responseType === "challenge" && !wasCalledWordValid
               ? null
-              : (continuationWord || wordCall.calledWord).length -
-                wordCall.wordFragment.length,
+              : calculateWordPot(wasContinuationValid === true ? (continuationWord ?? wordCall.calledWord) : wordCall.calledWord, game.settings.dictionary) -
+                calculateWordPot(wordCall.wordFragment, game.settings.dictionary),
           bluffBonus:
             responseType === "challenge" && !wasCalledWordValid
               ? pointsAwarded

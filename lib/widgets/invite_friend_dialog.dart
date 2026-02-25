@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../config/app_strings.dart';
 import '../providers/auth_provider.dart';
 import '../services/friend_service.dart';
 import '../services/share_service.dart';
@@ -80,7 +81,7 @@ class _InviteFriendDialogState extends ConsumerState<InviteFriendDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Invite a Friend'),
+      title: Text(S.inviteAFriend),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -88,7 +89,7 @@ class _InviteFriendDialogState extends ConsumerState<InviteFriendDialog> {
           children: [
             // Your invite code section
             Text(
-              'Your Invite Code',
+              S.yourInviteCode,
               style: Theme.of(context).textTheme.titleSmall,
             ),
             const SizedBox(height: 8),
@@ -107,12 +108,12 @@ class _InviteFriendDialogState extends ConsumerState<InviteFriendDialog> {
                 ),
                 _ShareButton(
                   icon: Icons.link,
-                  label: 'Copy',
+                  label: S.copy,
                   onTap: _inviteCode != null ? _copyLink : null,
                 ),
                 _ShareButton(
                   icon: Icons.share,
-                  label: 'Share',
+                  label: S.share,
                   onTap: _inviteCode != null ? _shareGeneric : null,
                 ),
               ],
@@ -124,15 +125,15 @@ class _InviteFriendDialogState extends ConsumerState<InviteFriendDialog> {
 
             // Add friend by code section
             Text(
-              "Have a friend's code?",
+              S.haveFriendsCode,
               style: Theme.of(context).textTheme.titleSmall,
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _codeController,
-              decoration: const InputDecoration(
-                hintText: 'Enter 6-letter code',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                hintText: S.enter6LetterCode,
+                border: const OutlineInputBorder(),
               ),
               textCapitalization: TextCapitalization.characters,
               maxLength: 6,
@@ -174,7 +175,7 @@ class _InviteFriendDialogState extends ConsumerState<InviteFriendDialog> {
                       width: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('Add Friend'),
+                  : Text(S.addFriend),
             ),
           ],
         ),
@@ -182,7 +183,7 @@ class _InviteFriendDialogState extends ConsumerState<InviteFriendDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Close'),
+          child: Text(S.close),
         ),
       ],
     );
@@ -210,7 +211,7 @@ class _InviteFriendDialogState extends ConsumerState<InviteFriendDialog> {
           TextButton.icon(
             onPressed: _loadInviteCode,
             icon: const Icon(Icons.refresh),
-            label: const Text('Retry'),
+            label: Text(S.retry),
           ),
         ],
       );
@@ -255,7 +256,7 @@ class _InviteFriendDialogState extends ConsumerState<InviteFriendDialog> {
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invite copied to clipboard!')),
+        SnackBar(content: Text(S.inviteCopied)),
       );
     }
   }
@@ -271,7 +272,7 @@ class _InviteFriendDialogState extends ConsumerState<InviteFriendDialog> {
     final code = _codeController.text.trim().toUpperCase();
 
     if (code.length != 6) {
-      setState(() => _error = 'Please enter a 6-letter code');
+      setState(() => _error = S.enter6LetterCodeError);
       return;
     }
 
@@ -288,7 +289,7 @@ class _InviteFriendDialogState extends ConsumerState<InviteFriendDialog> {
       if (mounted) {
         setState(() {
           _isAddingFriend = false;
-          _successMessage = 'Friend request sent!';
+          _successMessage = S.friendRequestSent;
           _codeController.clear();
         });
       }

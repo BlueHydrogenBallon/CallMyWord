@@ -10,7 +10,8 @@
     "deploy": "firebase deploy --only functions",
     "logs": "firebase functions:log",
     "lint": "eslint --ext .ts src/",
-    "lint:fix": "eslint --ext .ts src/ --fix"
+    "lint:fix": "eslint --ext .ts src/ --fix",
+    "update-descriptions": "node --experimental-strip-types src/scripts/update-greek-descriptions.ts"
   },
   "engines": {
     "node": "20"

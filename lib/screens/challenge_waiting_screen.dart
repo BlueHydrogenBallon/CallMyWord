@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../config/app_strings.dart';
 import '../models/friend_challenge.dart';
 import '../providers/friend_challenge_provider.dart';
 import '../services/friend_challenge_service.dart';
@@ -86,11 +87,11 @@ class _ChallengeWaitingScreenState
                 children: [
                   const Icon(Icons.error_outline, size: 48, color: Colors.red),
                   const SizedBox(height: 16),
-                  Text('Error: $error'),
+                  Text(S.errorMsg(error.toString())),
                   const SizedBox(height: 16),
                   ElevatedButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Go Back'),
+                    child: Text(S.goBack),
                   ),
                 ],
               ),
@@ -139,7 +140,7 @@ class _ChallengeWaitingScreenState
           const SizedBox(height: 32),
 
           Text(
-            'Waiting for',
+            S.waitingForLabel,
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 8),
@@ -151,7 +152,7 @@ class _ChallengeWaitingScreenState
           ),
           const SizedBox(height: 8),
           Text(
-            'to accept your challenge...',
+            S.toAcceptChallenge,
             style: Theme.of(context).textTheme.titleMedium,
           ),
 
@@ -166,7 +167,7 @@ class _ChallengeWaitingScreenState
                     width: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('Cancel Challenge'),
+                : Text(S.cancelChallenge),
           ),
         ],
       ),
@@ -186,19 +187,19 @@ class _ChallengeWaitingScreenState
           ),
           const SizedBox(height: 24),
           Text(
-            'Challenge Expired',
+            S.challengeExpired,
             style: Theme.of(context).textTheme.headlineSmall,
           ),
           const SizedBox(height: 16),
           Text(
-            '${widget.friendName} did not respond in time.',
+            S.didNotRespond(widget.friendName),
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyLarge,
           ),
           const SizedBox(height: 32),
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Go Back'),
+            child: Text(S.goBack),
           ),
         ],
       ),
@@ -238,15 +239,15 @@ class _ChallengeWaitingScreenState
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text('Challenge Declined'),
-        content: Text('${widget.friendName} declined your challenge.'),
+        title: Text(S.challengeDeclined),
+        content: Text(S.declinedYourChallenge(widget.friendName)),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.of(context).pop(); // Close dialog
               Navigator.of(context).pop(); // Go back
             },
-            child: const Text('OK'),
+            child: Text(S.ok),
           ),
         ],
       ),
@@ -257,19 +258,19 @@ class _ChallengeWaitingScreenState
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Cancel Challenge?'),
-        content: const Text('Are you sure you want to cancel this challenge?'),
+        title: Text(S.cancelChallengeQuestion),
+        content: Text(S.cancelChallengeConfirm),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('No'),
+            child: Text(S.no),
           ),
           TextButton(
             onPressed: () {
               Navigator.of(context).pop();
               _cancelChallenge();
             },
-            child: const Text('Yes, Cancel'),
+            child: Text(S.yesCancel),
           ),
         ],
       ),
@@ -292,7 +293,7 @@ class _ChallengeWaitingScreenState
       if (mounted) {
         setState(() => _isCancelling = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(content: Text(S.errorMsg(e.toString()))),
         );
       }
     }

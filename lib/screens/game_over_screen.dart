@@ -1,148 +1,259 @@
+import 'dart:math';
+
+import 'package:confetti/confetti.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../config/app_strings.dart';
 import '../models/game.dart';
 import '../providers/auth_provider.dart';
 
 /// Screen shown when a game ends
-class GameOverScreen extends ConsumerWidget {
+class GameOverScreen extends ConsumerStatefulWidget {
   final Game game;
 
   const GameOverScreen({super.key, required this.game});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<GameOverScreen> createState() => _GameOverScreenState();
+}
+
+class _GameOverScreenState extends ConsumerState<GameOverScreen> {
+  late final ConfettiController _confettiController;
+  late final bool _didWin;
+
+  @override
+  void initState() {
+    super.initState();
+    final userId = ref.read(currentUserIdProvider);
+    _didWin = userId != null && widget.game.didPlayerWin(userId);
+    _confettiController = ConfettiController(duration: const Duration(seconds: 4));
+    if (_didWin) {
+      _confettiController.play();
+    }
+  }
+
+  @override
+  void dispose() {
+    _confettiController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final userId = ref.watch(currentUserIdProvider);
-    final didWin = userId != null && game.didPlayerWin(userId);
-    final myPlayer = userId != null ? game.getPlayer(userId) : null;
-    final opponent = userId != null ? game.getOpponent(userId) : null;
+    final didWin = userId != null && widget.game.didPlayerWin(userId);
+
+    // Build ranked player list sorted by score descending
+    final rankedPlayers = widget.game.playerIds.map((pid) {
+      final player = widget.game.getPlayer(pid);
+      return (
+        playerId: pid,
+        displayName: player?.displayName ?? 'Player',
+        score: player?.score ?? 0,
+        isMe: pid == userId,
+        isWinner: pid == widget.game.winnerId,
+      );
+    }).toList()
+      ..sort((a, b) => b.score.compareTo(a.score));
 
     return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Result icon
-                Icon(
-                  didWin ? Icons.emoji_events : Icons.sentiment_dissatisfied,
-                  size: 80,
-                  color: didWin ? Colors.amber : Colors.grey,
-                ),
-
-                const SizedBox(height: 24),
-
-                // Result text
-                Text(
-                  didWin ? 'Victory!' : 'Defeat',
-                  style: TextStyle(
-                    fontSize: 36,
-                    fontWeight: FontWeight.bold,
-                    color: didWin ? Colors.amber.shade700 : Colors.grey.shade700,
-                  ),
-                ),
-
-                const SizedBox(height: 8),
-
-                // End reason
-                if (game.endReason != null)
-                  Text(
-                    _formatEndReason(game.endReason!),
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.grey[600],
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Result icon
+                    Icon(
+                      didWin ? Icons.emoji_events : Icons.sentiment_dissatisfied,
+                      size: 80,
+                      color: didWin ? Colors.amber : Colors.grey,
                     ),
-                    textAlign: TextAlign.center,
-                  ),
 
-                const SizedBox(height: 48),
+                    const SizedBox(height: 24),
 
-                // Score comparison
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // My score
-                      _ScoreColumn(
-                        label: 'You',
-                        score: myPlayer?.score ?? 0,
-                        isWinner: didWin,
+                    // Result text
+                    Text(
+                      didWin ? S.victory : S.defeat,
+                      style: TextStyle(
+                        fontSize: 36,
+                        fontWeight: FontWeight.bold,
+                        color: didWin ? Colors.amber.shade700 : Colors.grey.shade700,
                       ),
+                    ),
 
-                      const SizedBox(width: 32),
+                    const SizedBox(height: 8),
 
-                      // VS divider
+                    // End reason
+                    if (widget.game.endReason != null)
                       Text(
-                        'vs',
+                        _formatEndReason(widget.game.endReason!),
                         style: TextStyle(
                           fontSize: 16,
-                          color: Colors.grey[400],
+                          color: Colors.grey[600],
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+
+                    const SizedBox(height: 48),
+
+                    // Ranked player results
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (int i = 0; i < rankedPlayers.length; i++)
+                            Padding(
+                              padding: EdgeInsets.only(
+                                bottom: i < rankedPlayers.length - 1 ? 8 : 0,
+                              ),
+                              child: Row(
+                                children: [
+                                  // Rank / trophy
+                                  SizedBox(
+                                    width: 32,
+                                    child: rankedPlayers[i].isWinner
+                                        ? Icon(Icons.emoji_events,
+                                            color: Colors.amber.shade600, size: 24)
+                                        : Text(
+                                            '#${i + 1}',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.grey[500],
+                                            ),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  // Player name
+                                  Expanded(
+                                    child: Text(
+                                      rankedPlayers[i].isMe
+                                          ? S.you
+                                          : rankedPlayers[i].displayName,
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: rankedPlayers[i].isMe
+                                            ? FontWeight.bold
+                                            : FontWeight.w500,
+                                        color: rankedPlayers[i].isWinner
+                                            ? Colors.amber.shade700
+                                            : null,
+                                      ),
+                                    ),
+                                  ),
+                                  // Score
+                                  Text(
+                                    '${rankedPlayers[i].score}',
+                                    style: TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                      color: rankedPlayers[i].isWinner
+                                          ? Colors.amber.shade700
+                                          : Colors.grey.shade700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 48),
+
+                    // Last word played
+                    if (widget.game.currentWord.isNotEmpty) ...[
+                      Text(
+                        S.finalWordFragment,
+                        style: TextStyle(color: Colors.grey[600]),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        widget.game.currentWord,
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 4,
                         ),
                       ),
-
-                      const SizedBox(width: 32),
-
-                      // Opponent score
-                      _ScoreColumn(
-                        label: opponent?.displayName ?? 'Opponent',
-                        score: opponent?.score ?? 0,
-                        isWinner: !didWin,
-                      ),
+                      const SizedBox(height: 32),
                     ],
-                  ),
-                ),
 
-                const SizedBox(height: 48),
-
-                // Last word played
-                if (game.currentWord.isNotEmpty) ...[
-                  Text(
-                    'Final word fragment:',
-                    style: TextStyle(color: Colors.grey[600]),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    game.currentWord,
-                    style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 4,
+                    // Play again button
+                    ElevatedButton.icon(
+                      onPressed: () => _playAgain(context),
+                      icon: const Icon(Icons.replay),
+                      label: Text(S.playAgain),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 32,
+                          vertical: 16,
+                        ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 32),
-                ],
 
-                // Play again button
-                ElevatedButton.icon(
-                  onPressed: () => _playAgain(context),
-                  icon: const Icon(Icons.replay),
-                  label: const Text('Play Again'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 16,
+                    const SizedBox(height: 16),
+
+                    // Home button
+                    TextButton(
+                      onPressed: () => _goHome(context),
+                      child: Text(S.backToHome),
                     ),
-                  ),
+                  ],
                 ),
-
-                const SizedBox(height: 16),
-
-                // Home button
-                TextButton(
-                  onPressed: () => _goHome(context),
-                  child: const Text('Back to Home'),
-                ),
-              ],
+              ),
             ),
           ),
-        ),
+
+          // Confetti from top-left
+          Align(
+            alignment: Alignment.topLeft,
+            child: ConfettiWidget(
+              confettiController: _confettiController,
+              blastDirection: pi / 4,
+              colors: const [
+                Colors.amber,
+                Colors.orange,
+                Colors.yellow,
+                Colors.white,
+                Colors.deepOrange,
+              ],
+              numberOfParticles: 20,
+              emissionFrequency: 0.05,
+              gravity: 0.2,
+            ),
+          ),
+
+          // Confetti from top-right
+          Align(
+            alignment: Alignment.topRight,
+            child: ConfettiWidget(
+              confettiController: _confettiController,
+              blastDirection: 3 * pi / 4,
+              colors: const [
+                Colors.amber,
+                Colors.orange,
+                Colors.yellow,
+                Colors.white,
+                Colors.deepOrange,
+              ],
+              numberOfParticles: 20,
+              emissionFrequency: 0.05,
+              gravity: 0.2,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -150,75 +261,25 @@ class GameOverScreen extends ConsumerWidget {
   String _formatEndReason(String reason) {
     switch (reason) {
       case 'target_reached':
-        return '${game.winnerName} reached ${game.settings.targetScore} points!';
+        return S.winnerReachedScore(widget.game.winnerName!, widget.game.settings.targetScore);
       case 'challenge_won':
-        return '${game.winnerName} won the challenge!';
+        return S.winnerWonChallenge(widget.game.winnerName!);
       case 'challenge_lost':
-        return 'Challenge failed - word was valid!';
+        return S.challengeFailedWordValid;
       case 'challenge_timeout':
-        return 'Challenge timed out!';
+        return S.challengeTimedOut;
       case 'forfeit':
-        return 'Opponent forfeited';
+        return S.opponentForfeited;
       default:
         return reason;
     }
   }
 
   void _playAgain(BuildContext context) {
-    // Pop back to home, then navigate to matchmaking
     Navigator.of(context).popUntil((route) => route.isFirst);
-    // The home screen will handle starting a new game
   }
 
   void _goHome(BuildContext context) {
     Navigator.of(context).popUntil((route) => route.isFirst);
-  }
-}
-
-class _ScoreColumn extends StatelessWidget {
-  final String label;
-  final int score;
-  final bool isWinner;
-
-  const _ScoreColumn({
-    required this.label,
-    required this.score,
-    required this.isWinner,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 14,
-            color: Colors.grey[600],
-          ),
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 8),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (isWinner)
-              Icon(
-                Icons.star,
-                size: 20,
-                color: Colors.amber.shade600,
-              ),
-            Text(
-              '$score',
-              style: TextStyle(
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-                color: isWinner ? Colors.amber.shade700 : Colors.grey.shade700,
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
   }
 }

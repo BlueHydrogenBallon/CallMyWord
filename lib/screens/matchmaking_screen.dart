@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../config/app_strings.dart';
 import '../models/lobby.dart';
 import '../providers/auth_provider.dart';
 import '../services/matchmaking_service.dart';
@@ -71,7 +72,7 @@ class _MatchmakingScreenState extends ConsumerState<MatchmakingScreen> {
       (lobby) {
         if (lobby == null) {
           setState(() {
-            _error = 'Lobby was cancelled';
+            _error = S.lobbyCancelled;
           });
           return;
         }
@@ -84,7 +85,7 @@ class _MatchmakingScreenState extends ConsumerState<MatchmakingScreen> {
         // Lobby was cancelled
         if (lobby.status == LobbyStatus.cancelled) {
           setState(() {
-            _error = 'Matchmaking was cancelled';
+            _error = S.matchmakingCancelled;
           });
         }
       },
@@ -130,7 +131,7 @@ class _MatchmakingScreenState extends ConsumerState<MatchmakingScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Finding Game'),
+        title: Text(S.findingGame),
         automaticallyImplyLeading: false,
       ),
       body: SafeArea(
@@ -149,7 +150,7 @@ class _MatchmakingScreenState extends ConsumerState<MatchmakingScreen> {
                   ),
                   const SizedBox(height: 24),
                   Text(
-                    'Something went wrong',
+                    S.somethingWentWrong,
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                   const SizedBox(height: 8),
@@ -161,12 +162,12 @@ class _MatchmakingScreenState extends ConsumerState<MatchmakingScreen> {
                   const SizedBox(height: 32),
                   ElevatedButton(
                     onPressed: _startMatchmaking,
-                    child: const Text('Try Again'),
+                    child: Text(S.tryAgain),
                   ),
                   const SizedBox(height: 16),
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Go Back'),
+                    child: Text(S.goBack),
                   ),
                 ] else ...[
                   // Searching state
@@ -177,12 +178,12 @@ class _MatchmakingScreenState extends ConsumerState<MatchmakingScreen> {
                   ),
                   const SizedBox(height: 32),
                   Text(
-                    'Looking for opponent...',
+                    S.lookingForOpponent,
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'This usually takes a few seconds',
+                    S.matchmakingSubtitle,
                     style: TextStyle(color: Colors.grey[600]),
                   ),
                   const SizedBox(height: 48),
@@ -194,7 +195,7 @@ class _MatchmakingScreenState extends ConsumerState<MatchmakingScreen> {
                             height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('Cancel'),
+                        : Text(S.cancel),
                   ),
                 ],
               ],

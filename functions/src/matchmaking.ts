@@ -27,7 +27,8 @@ export const joinOrCreateLobby = onCall<JoinOrCreateLobbyRequest>(
 
     const playerId = request.auth.uid;
     const playerName = request.data.playerName || "Player";
-    console.log("Player:", playerId, playerName);
+    const dictionary = request.data.dictionary || "english";
+    console.log("Player:", playerId, playerName, "dictionary:", dictionary);
 
     // Step 1: Check if player is already in an active lobby
     console.log("Step 1: Checking for existing lobby...");
@@ -44,9 +45,9 @@ export const joinOrCreateLobby = onCall<JoinOrCreateLobbyRequest>(
     }
     console.log("No existing lobby found");
 
-    // Step 2: Try to join an available lobby
+    // Step 2: Try to join an available lobby with the same dictionary
     console.log("Step 2: Trying to join available lobby...");
-    const joinResult = await tryJoinAvailableLobby(playerId, playerName);
+    const joinResult = await tryJoinAvailableLobby(playerId, playerName, dictionary);
     if (joinResult) {
       console.log("Joined lobby:", joinResult.lobbyId, "gameId:", joinResult.gameId);
       return joinResult;
@@ -55,7 +56,7 @@ export const joinOrCreateLobby = onCall<JoinOrCreateLobbyRequest>(
 
     // Step 3: No available lobbies - create new one
     console.log("Step 3: Creating new lobby...");
-    const newLobby = await createNewLobby(playerId, playerName);
+    const newLobby = await createNewLobby(playerId, playerName, dictionary);
     console.log("Created new lobby:", newLobby.lobbyId);
     return newLobby;
   }
@@ -107,16 +108,18 @@ async function findExistingLobby(
 }
 
 /**
- * Try to join an available lobby
+ * Try to join an available lobby with the same dictionary
  */
 async function tryJoinAvailableLobby(
   playerId: string,
-  playerName: string
+  playerName: string,
+  dictionary: string
 ): Promise<JoinOrCreateLobbyResponse | null> {
-  // Query for available lobbies
+  // Query for available lobbies matching the same dictionary
   const snapshot = await db
     .collection("lobbies")
     .where("status", "==", "waiting")
+    .where("dictionary", "==", dictionary)
     .where("playerCount", "<", 2)
     .orderBy("playerCount") // Required for inequality
     .orderBy("createdAt", "asc") // Oldest first for fairness
@@ -128,7 +131,8 @@ async function tryJoinAvailableLobby(
     const result = await tryJoinLobbyTransaction(
       lobbyDoc.id,
       playerId,
-      playerName
+      playerName,
+      dictionary
     );
     if (result) {
       return result;
@@ -144,7 +148,8 @@ async function tryJoinAvailableLobby(
 async function tryJoinLobbyTransaction(
   lobbyId: string,
   playerId: string,
-  playerName: string
+  playerName: string,
+  dictionary: string
 ): Promise<JoinOrCreateLobbyResponse | null> {
   try {
     const result = await db.runTransaction(async (transaction) => {
@@ -187,7 +192,7 @@ async function tryJoinLobbyTransaction(
           lobbyId,
           updatedPlayerIds,
           updatedPlayerNames,
-          getDefaultGameSettings()
+          getDefaultGameSettings(lobby.dictionary || dictionary)
         );
 
         transaction.set(gameRef, {
@@ -236,7 +241,8 @@ async function tryJoinLobbyTransaction(
  */
 async function createNewLobby(
   playerId: string,
-  playerName: string
+  playerName: string,
+  dictionary: string
 ): Promise<JoinOrCreateLobbyResponse> {
   const lobbyRef = db.collection("lobbies").doc();
 
@@ -250,6 +256,7 @@ async function createNewLobby(
     maxPlayers: 2,
     status: "waiting",
     gameId: null,
+    dictionary,
   };
 
   await lobbyRef.set({
@@ -261,7 +268,7 @@ async function createNewLobby(
   console.log("Created lobby:", lobbyRef.id, "- now checking for other waiting lobbies...");
 
   // Immediately try to match with another waiting lobby to prevent race conditions
-  const matchResult = await tryMatchWithWaitingLobby(lobbyRef.id, playerId, playerName);
+  const matchResult = await tryMatchWithWaitingLobby(lobbyRef.id, playerId, playerName, dictionary);
   if (matchResult) {
     console.log("Matched with another lobby! gameId:", matchResult.gameId);
     return matchResult;
@@ -283,12 +290,14 @@ async function createNewLobby(
 async function tryMatchWithWaitingLobby(
   ourLobbyId: string,
   playerId: string,
-  playerName: string
+  playerName: string,
+  dictionary: string
 ): Promise<JoinOrCreateLobbyResponse | null> {
-  // Find other waiting lobbies (not ours)
+  // Find other waiting lobbies (not ours) with the same dictionary
   const snapshot = await db
     .collection("lobbies")
     .where("status", "==", "waiting")
+    .where("dictionary", "==", dictionary)
     .where("playerCount", "==", 1)
     .orderBy("createdAt", "asc")
     .limit(5)
@@ -298,7 +307,7 @@ async function tryMatchWithWaitingLobby(
   for (const lobbyDoc of snapshot.docs) {
     if (lobbyDoc.id === ourLobbyId) continue; // Skip our own lobby
 
-    const result = await tryMergeLobbies(ourLobbyId, lobbyDoc.id, playerId, playerName);
+    const result = await tryMergeLobbies(ourLobbyId, lobbyDoc.id, playerId, playerName, dictionary);
     if (result) {
       return result;
     }
@@ -314,7 +323,8 @@ async function tryMergeLobbies(
   ourLobbyId: string,
   otherLobbyId: string,
   playerId: string,
-  playerName: string
+  playerName: string,
+  dictionary: string
 ): Promise<JoinOrCreateLobbyResponse | null> {
   try {
     const result = await db.runTransaction(async (transaction) => {
@@ -356,7 +366,7 @@ async function tryMergeLobbies(
         otherLobbyId,
         updatedPlayerIds,
         updatedPlayerNames,
-        getDefaultGameSettings()
+        getDefaultGameSettings(otherLobby.dictionary || dictionary)
       );
 
       transaction.set(gameRef, {

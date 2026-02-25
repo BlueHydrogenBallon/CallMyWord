@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../config/app_config.dart';
 import '../models/lobby.dart';
 
 /// Matchmaking service provider
@@ -45,6 +46,7 @@ class MatchmakingService {
     final callable = _functions.httpsCallable('joinOrCreateLobby');
     final result = await callable.call<Map<String, dynamic>>({
       'playerName': playerName,
+      'dictionary': kDictionary,
     });
 
     final data = result.data;

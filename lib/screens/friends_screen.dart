@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../config/app_strings.dart';
 import '../models/friend.dart';
 import '../providers/friend_provider.dart';
 import '../services/friend_service.dart';
@@ -27,11 +28,11 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Friends'),
+        title: Text(S.friends),
         actions: [
           IconButton(
             icon: const Icon(Icons.person_add),
-            tooltip: 'Invite Friend',
+            tooltip: S.inviteFriend,
             onPressed: _showInviteDialog,
           ),
         ],
@@ -81,14 +82,14 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
                 return SliverList(
                   delegate: SliverChildListDelegate([
                     if (onlineFriends.isNotEmpty) ...[
-                      _buildSectionHeader('Online (${onlineFriends.length})'),
+                      _buildSectionHeader(S.onlineCount(onlineFriends.length)),
                       ...onlineFriends.map((friend) => FriendListItem(
                             friend: friend,
                             onChallenge: () => _challengeFriend(friend),
                           )),
                     ],
                     if (offlineFriends.isNotEmpty) ...[
-                      _buildSectionHeader('Offline (${offlineFriends.length})'),
+                      _buildSectionHeader(S.offlineCount(offlineFriends.length)),
                       ...offlineFriends.map((friend) => FriendListItem(
                             friend: friend,
                             onChallenge: null, // Can't challenge offline friends
@@ -107,11 +108,11 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
                     children: [
                       const Icon(Icons.error_outline, size: 48, color: Colors.red),
                       const SizedBox(height: 16),
-                      Text('Error loading friends: $error'),
+                      Text(S.errorMsg(error.toString())),
                       const SizedBox(height: 16),
                       ElevatedButton(
                         onPressed: () => ref.invalidate(friendsProvider),
-                        child: const Text('Retry'),
+                        child: Text(S.retry),
                       ),
                     ],
                   ),
@@ -145,7 +146,7 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Friend Requests (${requests.length})',
+            S.friendRequestCount(requests.length),
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
@@ -165,18 +166,18 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
           child: Text(request.displayName[0].toUpperCase()),
         ),
         title: Text(request.displayName),
-        subtitle: const Text('Wants to be your friend'),
+        subtitle: Text(S.wantsToBeFriend),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             IconButton(
               icon: const Icon(Icons.check, color: Colors.green),
-              tooltip: 'Accept',
+              tooltip: S.accept,
               onPressed: () => _acceptRequest(request),
             ),
             IconButton(
               icon: const Icon(Icons.close, color: Colors.red),
-              tooltip: 'Decline',
+              tooltip: S.decline,
               onPressed: () => _declineRequest(request),
             ),
           ],
@@ -199,20 +200,20 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              'No friends yet',
+              S.noFriendsYet,
               style: Theme.of(context).textTheme.headlineSmall,
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Invite friends to play Call My Word together!',
+            Text(
+              S.inviteFriendsPrompt,
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.grey),
+              style: const TextStyle(color: Colors.grey),
             ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
               onPressed: _showInviteDialog,
               icon: const Icon(Icons.person_add),
-              label: const Text('Invite Friend'),
+              label: Text(S.inviteFriend),
             ),
           ],
         ),
@@ -233,13 +234,13 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
       await friendService.acceptFriendRequest(request.odId);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${request.displayName} is now your friend!')),
+          SnackBar(content: Text(S.isNowYourFriend(request.displayName))),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(content: Text(S.errorMsg(e.toString()))),
         );
       }
     }
@@ -252,7 +253,7 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(content: Text(S.errorMsg(e.toString()))),
         );
       }
     }
@@ -280,7 +281,7 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(content: Text(S.errorMsg(e.toString()))),
         );
       }
     } finally {

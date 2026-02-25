@@ -89,9 +89,9 @@ export function getRemainingPlayerId(
 /**
  * Default game settings
  */
-export function getDefaultGameSettings(): GameSettings {
+export function getDefaultGameSettings(dictionary = "english"): GameSettings {
   return {
-    dictionary: "english",
+    dictionary,
     startingLives: 3,
     turnTimeoutSeconds: 60,
     challengeResponseSeconds: 30,

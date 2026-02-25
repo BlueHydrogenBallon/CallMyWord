@@ -11,19 +11,33 @@ const LETTER_POINTS: Record<string, number> = {
 };
 
 /**
+ * Greek Scrabble-style letter point values
+ */
+const GREEK_LETTER_POINTS: Record<string, number> = {
+  "Α": 1, "Β": 8, "Γ": 4, "Δ": 4, "Ε": 1,
+  "Ζ": 10, "Η": 1, "Θ": 10, "Ι": 1, "Κ": 2,
+  "Λ": 3, "Μ": 3, "Ν": 1, "Ξ": 10, "Ο": 1,
+  "Π": 2, "Ρ": 2, "Σ": 1, "Τ": 1, "Υ": 2,
+  "Φ": 8, "Χ": 8, "Ψ": 10, "Ω": 3,
+};
+
+/**
  * Get the point value for a single letter
  */
-export function getLetterPoints(letter: string): number {
+export function getLetterPoints(letter: string, dictionary = "english"): number {
+  if (dictionary === "greek") {
+    return GREEK_LETTER_POINTS[letter.toUpperCase()] || 0;
+  }
   return LETTER_POINTS[letter.toUpperCase()] || 0;
 }
 
 /**
  * Calculate the word pot (sum of all letter points)
  */
-export function calculateWordPot(word: string): number {
+export function calculateWordPot(word: string, dictionary = "english"): number {
   let total = 0;
   for (const letter of word.toUpperCase()) {
-    total += getLetterPoints(letter);
+    total += getLetterPoints(letter, dictionary);
   }
   return total;
 }
@@ -46,10 +60,11 @@ export function calculateDefenderWinScore(
   wordFragment: string,
   claimedWord: string,
   defenderId: string,
-  defenderName: string
+  defenderName: string,
+  dictionary = "english"
 ): ScoringResult {
-  const wordPot = calculateWordPot(wordFragment);
-  const wordBonus = claimedWord.length - wordFragment.length;
+  const wordPot = calculateWordPot(wordFragment, dictionary);
+  const wordBonus = calculateWordPot(claimedWord, dictionary) - wordPot;
   const totalAwarded = wordPot + wordBonus;
 
   return {
@@ -70,9 +85,10 @@ export function calculateDefenderWinScore(
 export function calculateChallengerWinScore(
   wordFragment: string,
   challengerId: string,
-  challengerName: string
+  challengerName: string,
+  dictionary = "english"
 ): ScoringResult {
-  const wordPot = calculateWordPot(wordFragment);
+  const wordPot = calculateWordPot(wordFragment, dictionary);
   const bluffBonus = Math.max(2, Math.floor(wordPot * 0.3));
 
   return {

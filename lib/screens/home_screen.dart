@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../config/app_strings.dart';
 import '../models/friend_challenge.dart';
 import '../providers/auth_provider.dart';
 import '../providers/audio_provider.dart';
@@ -12,6 +13,7 @@ import '../widgets/incoming_challenge_dialog.dart';
 import 'auth_screen.dart';
 import 'friends_screen.dart';
 import 'matchmaking_screen.dart';
+import 'party_setup_screen.dart';
 
 /// Home screen / Lobby - entry point of the app
 class HomeScreen extends ConsumerStatefulWidget {
@@ -156,7 +158,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
                           Center(
                             child: Text(
-                              'A turn-based word game',
+                              S.appSubtitle,
                               style: Theme.of(context)
                                   .textTheme
                                   .bodyLarge
@@ -180,12 +182,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 return Center(
                                   child: ElevatedButton(
                                     onPressed: () => _onSignInPressed(context),
-                                    child: const Padding(
-                                      padding: EdgeInsets.symmetric(
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
                                           horizontal: 24, vertical: 8),
                                       child: Text(
-                                        'Sign In',
-                                        style: TextStyle(
+                                        S.signIn,
+                                        style: const TextStyle(
                                           fontSize: 24,
                                           fontWeight: FontWeight.bold,
                                         ),
@@ -204,12 +206,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                       child: ElevatedButton(
                                         onPressed: () =>
                                             _onNewGamePressed(context, ref),
-                                        child: const Padding(
-                                          padding: EdgeInsets.symmetric(
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
                                               horizontal: 12, vertical: 12),
                                           child: Text(
-                                            'New Game',
-                                            style: TextStyle(
+                                            S.newGame,
+                                            style: const TextStyle(
                                               fontSize: 18,
                                               fontWeight: FontWeight.bold,
                                             ),
@@ -229,12 +231,37 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                       child: ElevatedButton(
                                         onPressed: () =>
                                             _onChallengeAFriendPressed(context),
-                                        child: const Padding(
-                                          padding: EdgeInsets.symmetric(
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
                                               horizontal: 12, vertical: 12),
                                           child: Text(
-                                            'Challenge a Friend',
-                                            style: TextStyle(
+                                            S.challengeAFriend,
+                                            style: const TextStyle(
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                            maxLines: 1,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+
+                                  const SizedBox(height: 16),
+
+                                  // Multiplayer Party button
+                                  Center(
+                                    child: SizedBox(
+                                      width: 250,
+                                      child: ElevatedButton(
+                                        onPressed: () =>
+                                            _onMultiplayerPartyPressed(context),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 12, vertical: 12),
+                                          child: Text(
+                                            S.multiplayerParty,
+                                            style: const TextStyle(
                                               fontSize: 18,
                                               fontWeight: FontWeight.bold,
                                             ),
@@ -252,14 +279,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             error: (error, _) => Column(
                               children: [
                                 Text(
-                                  'Error: $error',
+                                  S.errorMsg(error.toString()),
                                   style: const TextStyle(color: Colors.red),
                                 ),
                                 const SizedBox(height: 16),
                                 ElevatedButton(
                                   onPressed: () =>
                                       ref.invalidate(authStateProvider),
-                                  child: const Text('Retry'),
+                                  child: Text(S.retry),
                                 ),
                               ],
                             ),
@@ -271,7 +298,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           Center(
                             child: TextButton(
                               onPressed: () => _showHowToPlay(context),
-                              child: const Text('How to Play'),
+                              child: Text(S.howToPlay),
                             ),
                           ),
                         ],
@@ -318,11 +345,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${challenge.challengerName} challenges you!',
+                        S.challengesYou(challenge.challengerName),
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                       Text(
-                        'Tap to respond (${challenge.remainingSeconds}s left)',
+                        S.tapToRespond(challenge.remainingSeconds),
                         style: TextStyle(
                           fontSize: 12,
                           color:
@@ -354,7 +381,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           data: (user) {
             if (user == null) return const SizedBox(width: 48);
             final displayName = user.isAnonymous
-                ? 'Guest'
+                ? S.guest
                 : (user.displayName ?? user.email ?? 'User');
             return Row(
               mainAxisSize: MainAxisSize.min,
@@ -374,23 +401,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   },
                   itemBuilder: (context) => [
                     if (user.isAnonymous)
-                      const PopupMenuItem(
+                      PopupMenuItem(
                         value: 'upgrade',
                         child: Row(
                           children: [
-                            Icon(Icons.upgrade, size: 20),
-                            SizedBox(width: 8),
-                            Text('Upgrade Account'),
+                            const Icon(Icons.upgrade, size: 20),
+                            const SizedBox(width: 8),
+                            Text(S.upgradeAccount),
                           ],
                         ),
                       ),
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: 'signout',
                       child: Row(
                         children: [
-                          Icon(Icons.logout, size: 20),
-                          SizedBox(width: 8),
-                          Text('Sign Out'),
+                          const Icon(Icons.logout, size: 20),
+                          const SizedBox(width: 8),
+                          Text(S.signOut),
                         ],
                       ),
                     ),
@@ -448,6 +475,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+  void _onMultiplayerPartyPressed(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const PartySetupScreen(),
+      ),
+    );
+  }
+
   void _onSignInPressed(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -468,30 +503,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('How to Play'),
-        content: const SingleChildScrollView(
+        title: Text(S.howToPlay),
+        content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                '1. Players take turns adding one letter to build a word fragment.\n\n'
-                '2. You must always be building toward a valid word.\n\n'
-                '3. If you think your opponent is bluffing (not building toward a real word), challenge them!\n\n'
-                '4. When challenged, you must prove your word by completing it.\n\n'
-                '5. First player to reach 50 points wins!\n\n'
-                'Scoring:\n'
-                '• Letters are worth Scrabble points\n'
-                '• Win a challenge defense: Word Pot + Word Bonus\n'
-                '• Catch a bluff: Bluff Bonus',
-              ),
+              Text(S.howToPlayInstructions),
             ],
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Got it!'),
+            child: Text(S.gotIt),
           ),
         ],
       ),

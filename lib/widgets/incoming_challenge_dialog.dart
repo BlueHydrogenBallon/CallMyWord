@@ -3,9 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../config/app_strings.dart';
 import '../models/friend_challenge.dart';
 import '../services/friend_challenge_service.dart';
+import '../services/party_service.dart';
 import '../screens/game_screen.dart';
+import '../screens/party_waiting_screen.dart';
 
 /// Dialog shown when receiving a friend challenge
 class IncomingChallengeDialog extends ConsumerStatefulWidget {
@@ -58,15 +61,17 @@ class _IncomingChallengeDialogState
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
+    final isParty = widget.challenge.isParty;
+
     return AlertDialog(
       title: Row(
         children: [
           Icon(
-            Icons.sports_esports,
+            isParty ? Icons.groups : Icons.sports_esports,
             color: colorScheme.primary,
           ),
           const SizedBox(width: 8),
-          const Text('Game Challenge!'),
+          Text(isParty ? S.partyInvite : S.gameChallenge),
         ],
       ),
       content: Column(
@@ -95,7 +100,7 @@ class _IncomingChallengeDialogState
                 ),
           ),
           const SizedBox(height: 8),
-          const Text('wants to play!'),
+          Text(isParty ? S.invitedToParty : S.wantsToPlay),
 
           const SizedBox(height: 24),
 
@@ -133,7 +138,7 @@ class _IncomingChallengeDialogState
       actions: [
         TextButton(
           onPressed: _isResponding ? null : _declineChallenge,
-          child: const Text('Decline'),
+          child: Text(S.decline),
         ),
         const SizedBox(width: 16),
         ElevatedButton(
@@ -144,7 +149,7 @@ class _IncomingChallengeDialogState
                   width: 20,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('Accept'),
+              : Text(S.accept),
         ),
       ],
     );
@@ -156,24 +161,45 @@ class _IncomingChallengeDialogState
     setState(() => _isResponding = true);
 
     try {
-      final challengeService = ref.read(friendChallengeServiceProvider);
-      final result = await challengeService.acceptChallenge(widget.challenge.id);
+      if (widget.challenge.isParty) {
+        // Party invite — join the lobby and go to waiting room
+        final partyService = ref.read(partyServiceProvider);
+        final lobbyId = widget.challenge.lobbyId;
+        if (lobbyId == null) throw Exception('No lobby associated with invite');
 
-      if (mounted) {
-        Navigator.of(context).pop(); // Close dialog
+        await partyService.joinPartyLobby(lobbyId, widget.challenge.id);
 
-        // Navigate to game
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (context) => GameScreen(gameId: result.gameId),
-          ),
-        );
+        if (mounted) {
+          Navigator.of(context).pop(); // Close dialog
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => PartyWaitingScreen(
+                lobbyId: lobbyId,
+                isHost: false,
+              ),
+            ),
+          );
+        }
+      } else {
+        // 1v1 challenge — accept and go directly to game
+        final challengeService = ref.read(friendChallengeServiceProvider);
+        final result =
+            await challengeService.acceptChallenge(widget.challenge.id);
+
+        if (mounted) {
+          Navigator.of(context).pop(); // Close dialog
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => GameScreen(gameId: result.gameId),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isResponding = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(content: Text(S.errorMsg(e.toString()))),
         );
       }
     }
@@ -195,7 +221,7 @@ class _IncomingChallengeDialogState
       if (mounted) {
         setState(() => _isResponding = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(content: Text(S.errorMsg(e.toString()))),
         );
       }
     }
