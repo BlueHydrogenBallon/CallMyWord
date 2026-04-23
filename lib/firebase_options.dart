@@ -54,6 +54,7 @@ class DefaultFirebaseOptions {
     projectId: 'call-my-word-1634f',
     authDomain: 'call-my-word-1634f.firebaseapp.com',
     storageBucket: 'call-my-word-1634f.firebasestorage.app',
+    databaseURL: 'https://call-my-word-1634f-default-rtdb.firebaseio.com',
     measurementId: 'G-NM9LGWP89H',
   );
 
@@ -63,6 +64,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '337700608453',
     projectId: 'call-my-word-1634f',
     storageBucket: 'call-my-word-1634f.firebasestorage.app',
+    databaseURL: 'https://call-my-word-1634f-default-rtdb.firebaseio.com',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
@@ -71,6 +73,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '337700608453',
     projectId: 'call-my-word-1634f',
     storageBucket: 'call-my-word-1634f.firebasestorage.app',
+    databaseURL: 'https://call-my-word-1634f-default-rtdb.firebaseio.com',
     iosClientId: '337700608453-rf6sv4mtgbl2l5gf9gjmrk2p1dd0utcc.apps.googleusercontent.com',
     iosBundleId: 'com.callmyword.callMyWord',
   );

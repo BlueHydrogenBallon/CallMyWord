@@ -6,12 +6,45 @@ import { Timestamp } from "firebase-admin/firestore";
 
 export interface UserProfile {
   displayName: string;
+  username: string | null;
   avatarUrl: string | null;
   gamesPlayed: number;
   gamesWon: number;
+  totalPointsScored: number;
   isAnonymous: boolean;
   createdAt: Timestamp;
   lastActiveAt: Timestamp;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PROFILE FUNCTION REQUEST/RESPONSE TYPES
+// ═══════════════════════════════════════════════════════════════
+
+export interface SetUsernameRequest {
+  username: string;
+}
+
+export interface SetUsernameResponse {
+  success: boolean;
+  username: string;
+}
+
+export interface GetGameHistoryRequest {
+  limit?: number;
+}
+
+export interface GameHistorySummary {
+  gameId: string;
+  opponentNames: string[];
+  playerScore: number;
+  opponentScores: Record<string, number>;
+  won: boolean;
+  endReason: string | null;
+  completedAt: Timestamp;
+}
+
+export interface GetGameHistoryResponse {
+  games: GameHistorySummary[];
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -40,7 +73,7 @@ export interface Lobby {
 // GAME TYPES
 // ═══════════════════════════════════════════════════════════════
 
-export type GameStatus = "in_progress" | "challenge_pending" | "word_call_pending" | "completed" | "abandoned";
+export type GameStatus = "in_progress" | "challenge_pending" | "word_call_pending" | "completed" | "abandoned" | "waiting_for_rejoin";
 
 export interface Player {
   displayName: string;
@@ -58,17 +91,41 @@ export interface PendingChallenge {
   wordFragment: string;
   responseDeadline: Timestamp;
   createdAt: Timestamp;
+  // Multi-player: other players can join the challenge or pass
+  // Key = playerId, value = their vote
+  otherPlayerVotes?: Record<string, ChallengeVote>;
+  // IDs of other players (not challenger, not challenged) who can vote
+  otherPlayerIds?: string[];
+}
+
+export interface ChallengeVote {
+  type: "join" | "pass";
+  playerName: string;
+  votedAt: Timestamp;
 }
 
 export interface PendingWordCall {
   callerId: string;
   callerName: string;
+  // Legacy single-responder fields (kept for 2-player backward compat)
   responderId: string;
   responderName: string;
   wordFragment: string;
   calledWord: string;
   responseDeadline: Timestamp;
   createdAt: Timestamp;
+  // Multi-player: all non-caller players vote independently
+  // Key = playerId, value = their response
+  responderVotes?: Record<string, WordCallVote>;
+  // IDs of all players who can vote (everyone except caller)
+  allResponderIds?: string[];
+}
+
+export interface WordCallVote {
+  type: "continue" | "challenge" | "accept";
+  continuationWord?: string | null;
+  playerName: string;
+  votedAt: Timestamp;
 }
 
 export interface ScoringDetails {
@@ -119,6 +176,16 @@ export interface ChallengeHistoryEntry {
   winnerName: string;
   pointsAwarded: number;
   timestamp: Timestamp;
+  // Player attribution
+  challengerName?: string;
+  challengedPlayerName?: string;
+  // Multi-player: per-player scoring breakdown
+  playerResults?: Record<string, ChallengePlayerResult>;
+}
+
+export interface ChallengePlayerResult {
+  joined: boolean;
+  pointsAwarded: number;
 }
 
 export interface WordCallHistoryEntry {
@@ -132,6 +199,19 @@ export interface WordCallHistoryEntry {
   winnerName: string | null;
   pointsAwarded: number;
   timestamp: Timestamp;
+  // Player attribution
+  callerName?: string;
+  responderName?: string;
+  // Multi-player: per-player scoring breakdown
+  playerResults?: Record<string, WordCallPlayerResult>;
+}
+
+export interface WordCallPlayerResult {
+  responseType: "continue" | "challenge" | "accept" | "timeout";
+  continuationWord?: string;
+  wasContinuationValid?: boolean;
+  pointsAwarded: number;
+  won: boolean;
 }
 
 export interface GameSettings {
@@ -152,6 +232,7 @@ export interface Game {
   wordPot: number;
   currentPlayerIndex: number;
   turnNumber: number;
+  wordTurnNumber: number;
   turnDeadline: Timestamp | null;
   status: GameStatus;
   pendingChallenge: PendingChallenge | null;
@@ -162,6 +243,8 @@ export interface Game {
   winnerId: string | null;
   winnerName: string | null;
   endReason: string | null;
+  abandonedBy?: string;
+  rejoinDeadline?: Timestamp;
   settings: GameSettings;
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -214,6 +297,12 @@ export interface RespondToWordCallRequest {
   gameId: string;
   responseType: WordCallResponseType;
   continuationWord?: string;
+}
+
+// Multi-player: other players vote on an active challenge
+export interface VoteOnChallengeRequest {
+  gameId: string;
+  vote: "join" | "pass";
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -307,6 +396,7 @@ export interface CancelFriendChallengeRequest {
 
 export interface CreatePartyLobbyRequest {
   invitedFriendIds: string[];
+  dictionary?: string;
 }
 
 export interface CreatePartyLobbyResponse {

@@ -7,7 +7,8 @@ enum GameStatus {
   challengePending,
   wordCallPending,
   completed,
-  abandoned;
+  abandoned,
+  waitingForRejoin;
 
   static GameStatus fromString(String value) {
     switch (value) {
@@ -21,6 +22,8 @@ enum GameStatus {
         return GameStatus.completed;
       case 'abandoned':
         return GameStatus.abandoned;
+      case 'waiting_for_rejoin':
+        return GameStatus.waitingForRejoin;
       default:
         return GameStatus.inProgress;
     }
@@ -38,8 +41,27 @@ enum GameStatus {
         return 'completed';
       case GameStatus.abandoned:
         return 'abandoned';
+      case GameStatus.waitingForRejoin:
+        return 'waiting_for_rejoin';
     }
   }
+}
+
+/// Vote by another player on an active challenge
+class ChallengeVote {
+  final String type; // "join" or "pass"
+  final String playerName;
+
+  const ChallengeVote({required this.type, required this.playerName});
+
+  factory ChallengeVote.fromMap(Map<String, dynamic> map) {
+    return ChallengeVote(
+      type: map['type'] ?? 'pass',
+      playerName: map['playerName'] ?? 'Unknown',
+    );
+  }
+
+  bool get isJoin => type == 'join';
 }
 
 /// Pending challenge data
@@ -51,6 +73,9 @@ class PendingChallenge {
   final String wordFragment;
   final DateTime responseDeadline;
   final DateTime createdAt;
+  // Multi-player fields
+  final List<String> otherPlayerIds;
+  final Map<String, ChallengeVote> otherPlayerVotes;
 
   const PendingChallenge({
     required this.challengerId,
@@ -60,9 +85,18 @@ class PendingChallenge {
     required this.wordFragment,
     required this.responseDeadline,
     required this.createdAt,
+    this.otherPlayerIds = const [],
+    this.otherPlayerVotes = const {},
   });
 
   factory PendingChallenge.fromMap(Map<String, dynamic> map) {
+    // Parse other player votes
+    final votesData = map['otherPlayerVotes'] as Map<String, dynamic>? ?? {};
+    final votes = <String, ChallengeVote>{};
+    votesData.forEach((id, voteData) {
+      votes[id] = ChallengeVote.fromMap(voteData as Map<String, dynamic>);
+    });
+
     return PendingChallenge(
       challengerId: map['challengerId'] ?? '',
       challengerName: map['challengerName'] ?? 'Unknown',
@@ -72,6 +106,8 @@ class PendingChallenge {
       responseDeadline:
           (map['responseDeadline'] as Timestamp?)?.toDate() ?? DateTime.now(),
       createdAt: (map['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      otherPlayerIds: List<String>.from(map['otherPlayerIds'] ?? []),
+      otherPlayerVotes: votes,
     );
   }
 
@@ -83,6 +119,33 @@ class PendingChallenge {
 
   /// Check if deadline has passed
   bool get hasExpired => DateTime.now().isAfter(responseDeadline);
+
+  /// Check if a player can vote (is an other player and hasn't voted yet)
+  bool canVote(String playerId) {
+    return otherPlayerIds.contains(playerId) && !otherPlayerVotes.containsKey(playerId);
+  }
+
+  /// Check if a player has already voted
+  bool hasVoted(String playerId) {
+    return otherPlayerVotes.containsKey(playerId);
+  }
+}
+
+/// Vote by a player on a word call
+class WordCallVote {
+  final String type; // "continue", "challenge", "accept"
+  final String? continuationWord;
+  final String playerName;
+
+  const WordCallVote({required this.type, this.continuationWord, required this.playerName});
+
+  factory WordCallVote.fromMap(Map<String, dynamic> map) {
+    return WordCallVote(
+      type: map['type'] ?? 'accept',
+      continuationWord: map['continuationWord'],
+      playerName: map['playerName'] ?? 'Unknown',
+    );
+  }
 }
 
 /// Pending word call data
@@ -95,6 +158,9 @@ class PendingWordCall {
   final String calledWord;
   final DateTime responseDeadline;
   final DateTime createdAt;
+  // Multi-player fields
+  final List<String> allResponderIds;
+  final Map<String, WordCallVote> responderVotes;
 
   const PendingWordCall({
     required this.callerId,
@@ -105,9 +171,18 @@ class PendingWordCall {
     required this.calledWord,
     required this.responseDeadline,
     required this.createdAt,
+    this.allResponderIds = const [],
+    this.responderVotes = const {},
   });
 
   factory PendingWordCall.fromMap(Map<String, dynamic> map) {
+    // Parse responder votes
+    final votesData = map['responderVotes'] as Map<String, dynamic>? ?? {};
+    final votes = <String, WordCallVote>{};
+    votesData.forEach((id, voteData) {
+      votes[id] = WordCallVote.fromMap(voteData as Map<String, dynamic>);
+    });
+
     return PendingWordCall(
       callerId: map['callerId'] ?? '',
       callerName: map['callerName'] ?? 'Unknown',
@@ -118,6 +193,8 @@ class PendingWordCall {
       responseDeadline:
           (map['responseDeadline'] as Timestamp?)?.toDate() ?? DateTime.now(),
       createdAt: (map['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      allResponderIds: List<String>.from(map['allResponderIds'] ?? []),
+      responderVotes: votes,
     );
   }
 
@@ -129,6 +206,23 @@ class PendingWordCall {
 
   /// Check if deadline has passed
   bool get hasExpired => DateTime.now().isAfter(responseDeadline);
+
+  /// Whether this is a multi-player word call
+  bool get isMultiPlayer => allResponderIds.length > 1;
+
+  /// Check if a specific player can respond (hasn't voted yet)
+  bool canRespond(String playerId) {
+    return allResponderIds.contains(playerId) && !responderVotes.containsKey(playerId);
+  }
+
+  /// Check if a player has already voted
+  bool hasVoted(String playerId) {
+    return responderVotes.containsKey(playerId);
+  }
+
+  /// Number of votes collected vs total needed
+  int get votesCollected => responderVotes.length;
+  int get votesNeeded => allResponderIds.length;
 }
 
 /// Word call history entry
@@ -143,6 +237,8 @@ class WordCallHistoryEntry {
   final String? winnerName;
   final int pointsAwarded;
   final DateTime timestamp;
+  final String? callerName;
+  final String? responderName;
 
   const WordCallHistoryEntry({
     required this.wordFragment,
@@ -155,6 +251,8 @@ class WordCallHistoryEntry {
     this.winnerName,
     required this.pointsAwarded,
     required this.timestamp,
+    this.callerName,
+    this.responderName,
   });
 
   factory WordCallHistoryEntry.fromMap(Map<String, dynamic> map) {
@@ -169,6 +267,8 @@ class WordCallHistoryEntry {
       winnerName: map['winnerName'],
       pointsAwarded: map['pointsAwarded'] ?? 0,
       timestamp: (map['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      callerName: map['callerName'],
+      responderName: map['responderName'],
     );
   }
 }
@@ -227,6 +327,8 @@ class ChallengeHistoryEntry {
   final String winnerName;
   final int pointsAwarded;
   final DateTime timestamp;
+  final String? challengerName;
+  final String? challengedPlayerName;
 
   const ChallengeHistoryEntry({
     required this.wordFragment,
@@ -236,6 +338,8 @@ class ChallengeHistoryEntry {
     required this.winnerName,
     required this.pointsAwarded,
     required this.timestamp,
+    this.challengerName,
+    this.challengedPlayerName,
   });
 
   factory ChallengeHistoryEntry.fromMap(Map<String, dynamic> map) {
@@ -247,6 +351,8 @@ class ChallengeHistoryEntry {
       winnerName: map['winnerName'] ?? 'Unknown',
       pointsAwarded: map['pointsAwarded'] ?? 0,
       timestamp: (map['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      challengerName: map['challengerName'],
+      challengedPlayerName: map['challengedPlayerName'],
     );
   }
 }
@@ -291,6 +397,7 @@ class Game {
   final int wordPot;
   final int currentPlayerIndex;
   final int turnNumber;
+  final int wordTurnNumber;
   final DateTime? turnDeadline;
   final GameStatus status;
   final PendingChallenge? pendingChallenge;
@@ -301,6 +408,8 @@ class Game {
   final String? winnerId;
   final String? winnerName;
   final String? endReason;
+  final String? abandonedBy;
+  final DateTime? rejoinDeadline;
   final GameSettings settings;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -314,6 +423,7 @@ class Game {
     this.wordPot = 0,
     this.currentPlayerIndex = 0,
     this.turnNumber = 0,
+    this.wordTurnNumber = 1,
     this.turnDeadline,
     this.status = GameStatus.inProgress,
     this.pendingChallenge,
@@ -324,6 +434,8 @@ class Game {
     this.winnerId,
     this.winnerName,
     this.endReason,
+    this.abandonedBy,
+    this.rejoinDeadline,
     required this.settings,
     required this.createdAt,
     required this.updatedAt,
@@ -360,6 +472,7 @@ class Game {
       wordPot: data['wordPot'] ?? 0,
       currentPlayerIndex: data['currentPlayerIndex'] ?? 0,
       turnNumber: data['turnNumber'] ?? 0,
+      wordTurnNumber: data['wordTurnNumber'] ?? 1,
       turnDeadline: (data['turnDeadline'] as Timestamp?)?.toDate(),
       status: GameStatus.fromString(data['status'] ?? 'in_progress'),
       pendingChallenge: data['pendingChallenge'] != null
@@ -376,6 +489,8 @@ class Game {
       winnerId: data['winnerId'],
       winnerName: data['winnerName'],
       endReason: data['endReason'],
+      abandonedBy: data['abandonedBy'],
+      rejoinDeadline: (data['rejoinDeadline'] as Timestamp?)?.toDate(),
       settings: GameSettings.fromMap(data['settings'] ?? {}),
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
@@ -404,6 +519,9 @@ class Game {
   /// Check if game is over
   bool get isGameOver =>
       status == GameStatus.completed || status == GameStatus.abandoned;
+
+  /// Check if game is in the "opponent left, waiting to rejoin" state
+  bool get isWaitingForRejoin => status == GameStatus.waitingForRejoin;
 
   /// Get a player by ID
   Player? getPlayer(String playerId) => players[playerId];
@@ -445,9 +563,29 @@ class Game {
   /// Check if there's a pending word call
   bool get isWordCallPending => status == GameStatus.wordCallPending;
 
-  /// Check if a player is the responder for the pending word call
+  /// Check if a player is a responder for the pending word call (multi-player aware)
   bool isWordCallResponder(String playerId) {
-    return pendingWordCall?.responderId == playerId;
+    if (pendingWordCall == null) return false;
+    // Multi-player: check allResponderIds and whether they haven't voted yet
+    if (pendingWordCall!.isMultiPlayer) {
+      return pendingWordCall!.canRespond(playerId);
+    }
+    // Legacy 2-player
+    return pendingWordCall!.responderId == playerId;
+  }
+
+  /// Check if a player has already voted on the word call
+  bool hasVotedOnWordCall(String playerId) {
+    return pendingWordCall?.hasVoted(playerId) ?? false;
+  }
+
+  /// Check if a player is involved in the word call (responder or already voted)
+  bool isWordCallParticipant(String playerId) {
+    if (pendingWordCall == null) return false;
+    if (pendingWordCall!.isMultiPlayer) {
+      return pendingWordCall!.allResponderIds.contains(playerId);
+    }
+    return pendingWordCall!.responderId == playerId;
   }
 
   /// Check if a player is the caller for the pending word call

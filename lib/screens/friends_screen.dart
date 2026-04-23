@@ -39,7 +39,7 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
       ),
       body: RefreshIndicator(
         onRefresh: () async {
-          ref.invalidate(friendsProvider);
+          ref.invalidate(rawFriendsProvider);
           ref.invalidate(pendingFriendRequestsProvider);
         },
         child: CustomScrollView(
@@ -111,7 +111,7 @@ class _FriendsScreenState extends ConsumerState<FriendsScreen> {
                       Text(S.errorMsg(error.toString())),
                       const SizedBox(height: 16),
                       ElevatedButton(
-                        onPressed: () => ref.invalidate(friendsProvider),
+                        onPressed: () => ref.invalidate(rawFriendsProvider),
                         child: Text(S.retry),
                       ),
                     ],

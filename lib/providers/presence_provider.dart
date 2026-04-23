@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -18,17 +19,17 @@ final presenceManagerProvider = Provider<PresenceManager>((ref) {
 /// Current user's online status
 final userOnlineStatusProvider = StateProvider<bool>((ref) => false);
 
-/// Manages user presence (online/offline status) with heartbeat
+/// Manages user presence via Firebase RTDB onDisconnect().
+///
+/// No heartbeat timer needed — RTDB handles disconnect detection server-side.
 class PresenceManager {
   final Ref _ref;
-  Timer? _heartbeatTimer;
+  StreamSubscription<DatabaseEvent>? _presenceSubscription;
   bool _isActive = false;
-
-  static const _heartbeatInterval = Duration(seconds: 30);
 
   PresenceManager(this._ref);
 
-  /// Start presence tracking (call when app becomes active)
+  /// Start presence tracking.
   Future<void> startPresence() async {
     if (_isActive) return;
 
@@ -36,40 +37,25 @@ class PresenceManager {
     if (userId == null) return;
 
     _isActive = true;
-    debugPrint('Starting presence for user: $userId');
+    debugPrint('Starting RTDB presence for user: $userId');
 
     try {
-      // Set online immediately
       final presenceService = _ref.read(presenceServiceProvider);
-      await presenceService.setOnline(userId);
+      _presenceSubscription = presenceService.setupPresence(userId);
       _ref.read(userOnlineStatusProvider.notifier).state = true;
-
-      // Start heartbeat timer
-      _heartbeatTimer?.cancel();
-      _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) async {
-        final currentUserId = _ref.read(currentUserIdProvider);
-        if (currentUserId != null && _isActive) {
-          try {
-            await presenceService.heartbeat(currentUserId);
-            debugPrint('Heartbeat sent for user: $currentUserId');
-          } catch (e) {
-            debugPrint('Error sending heartbeat: $e');
-          }
-        }
-      });
     } catch (e) {
       debugPrint('Error starting presence: $e');
       _isActive = false;
     }
   }
 
-  /// Stop presence tracking (call when app becomes inactive)
+  /// Stop presence tracking (e.g. on sign-out).
   Future<void> stopPresence() async {
     if (!_isActive) return;
 
     _isActive = false;
-    _heartbeatTimer?.cancel();
-    _heartbeatTimer = null;
+    await _presenceSubscription?.cancel();
+    _presenceSubscription = null;
 
     final userId = _ref.read(currentUserIdProvider);
     if (userId == null) return;
@@ -85,13 +71,11 @@ class PresenceManager {
     }
   }
 
-  /// Check if presence is currently active
   bool get isActive => _isActive;
 
-  /// Dispose the manager
   void dispose() {
-    _heartbeatTimer?.cancel();
-    _heartbeatTimer = null;
+    _presenceSubscription?.cancel();
+    _presenceSubscription = null;
     _isActive = false;
   }
 }

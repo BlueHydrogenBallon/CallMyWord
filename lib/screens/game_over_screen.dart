@@ -1,12 +1,16 @@
 import 'dart:math';
 
 import 'package:confetti/confetti.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/app_strings.dart';
 import '../models/game.dart';
 import '../providers/auth_provider.dart';
+import '../services/ad_service.dart';
+import '../widgets/web_interstitial_overlay.dart';
+import 'matchmaking_screen.dart';
 
 /// Screen shown when a game ends
 class GameOverScreen extends ConsumerStatefulWidget {
@@ -269,17 +273,41 @@ class _GameOverScreenState extends ConsumerState<GameOverScreen> {
       case 'challenge_timeout':
         return S.challengeTimedOut;
       case 'forfeit':
+      case 'opponent_forfeited':
         return S.opponentForfeited;
       default:
         return reason;
     }
   }
 
-  void _playAgain(BuildContext context) {
-    Navigator.of(context).popUntil((route) => route.isFirst);
-  }
+  void _playAgain(BuildContext context) => _navigateWithAd(context, startNewGame: true);
+  void _goHome(BuildContext context) => _navigateWithAd(context, startNewGame: false);
 
-  void _goHome(BuildContext context) {
-    Navigator.of(context).popUntil((route) => route.isFirst);
+  void _navigateWithAd(BuildContext context, {required bool startNewGame}) {
+    void navigate() {
+      if (!mounted) return;
+      // Pop back to home first
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      // If "Play Again", push straight into matchmaking for a new game
+      if (startNewGame) {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const MatchmakingScreen()),
+        );
+      }
+    }
+
+    if (kIsWeb) {
+      showGeneralDialog(
+        context: context,
+        barrierDismissible: false,
+        pageBuilder: (ctx, _, __) =>
+            WebInterstitialOverlay(onClose: () {
+              Navigator.of(ctx).pop();
+              navigate();
+            }),
+      );
+    } else {
+      ref.read(adServiceProvider).showInterstitialIfReady(onComplete: navigate);
+    }
   }
 }

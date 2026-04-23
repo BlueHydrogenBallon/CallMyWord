@@ -148,6 +148,7 @@ export function createGameFromLobby(
     wordPot: 0,
     currentPlayerIndex: firstPlayerIndex,
     turnNumber: 0,
+    wordTurnNumber: 1,
     turnDeadline: calculateTurnDeadline(settings),
     status: "in_progress",
     pendingChallenge: null,

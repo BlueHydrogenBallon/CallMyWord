@@ -8,6 +8,7 @@ class PlayerScoreCard extends StatelessWidget {
   final String label;
   final bool isCurrentTurn;
   final int targetScore;
+  final MaterialColor accentColor;
 
   const PlayerScoreCard({
     super.key,
@@ -15,22 +16,26 @@ class PlayerScoreCard extends StatelessWidget {
     required this.label,
     this.isCurrentTurn = false,
     this.targetScore = 50,
+    this.accentColor = Colors.green,
   });
 
   @override
   Widget build(BuildContext context) {
     final score = player?.score ?? 0;
     final progress = (score / targetScore).clamp(0.0, 1.0);
+    final colorScheme = Theme.of(context).colorScheme;
+
+    final progressColor = accentColor.shade400;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: isCurrentTurn
-            ? Colors.green.shade50
-            : Theme.of(context).colorScheme.surfaceContainerHighest,
+            ? accentColor.shade50
+            : colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(10),
         border: isCurrentTurn
-            ? Border.all(color: Colors.green.shade400, width: 2)
+            ? Border.all(color: accentColor.shade400, width: 2)
             : null,
       ),
       child: Row(
@@ -42,62 +47,60 @@ class PlayerScoreCard extends StatelessWidget {
               height: 6,
               margin: const EdgeInsets.only(right: 6),
               decoration: BoxDecoration(
-                color: Colors.green.shade500,
+                color: accentColor.shade500,
                 shape: BoxShape.circle,
               ),
             ),
-          // Label and score
+          // Player name
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: colorScheme.onSurface,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Circular progress with score inside
+          SizedBox(
+            width: 52,
+            height: 52,
+            child: Stack(
+              alignment: Alignment.center,
               children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.grey[600],
+                SizedBox.expand(
+                  child: CircularProgressIndicator(
+                    value: progress,
+                    strokeWidth: 4,
+                    backgroundColor: Colors.grey.shade600,
+                    valueColor: AlwaysStoppedAnimation<Color>(progressColor),
                   ),
-                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 2),
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Flexible(
-                      child: Text(
-                        '$score',
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                    Text(
+                      '$score',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        height: 1,
                       ),
                     ),
                     Text(
                       '/$targetScore',
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 16,
                         color: Colors.grey[500],
+                        height: 1,
                       ),
                     ),
                   ],
                 ),
               ],
-            ),
-          ),
-          // Progress indicator
-          SizedBox(
-            width: 32,
-            height: 32,
-            child: CircularProgressIndicator(
-              value: progress,
-              strokeWidth: 3,
-              backgroundColor: Colors.grey.shade300,
-              valueColor: AlwaysStoppedAnimation<Color>(
-                progress >= 1.0 ? Colors.green : Colors.blue,
-              ),
             ),
           ),
         ],

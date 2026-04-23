@@ -8,12 +8,15 @@ import {
   RespondToChallengeRequest,
   CallWordRequest,
   RespondToWordCallRequest,
+  VoteOnChallengeRequest,
   LastAction,
   PendingChallenge,
   PendingWordCall,
   ScoringDetails,
   ChallengeHistoryEntry,
   WordCallHistoryEntry,
+  WordCallPlayerResult,
+  ChallengePlayerResult,
 } from "./types";
 import {
   getLetterPoints,
@@ -148,6 +151,7 @@ export const submitMove = onCall<SubmitMoveRequest>(async (request) => {
       wordPot: newWordPot,
       currentPlayerIndex: nextPlayerIndex,
       turnNumber: game.turnNumber + 1,
+      wordTurnNumber: game.wordTurnNumber + 1,
       turnDeadline: calculateTurnDeadline(game.settings),
       lastAction,
       updatedAt: FieldValue.serverTimestamp(),
@@ -232,6 +236,11 @@ export const initiateChallenge = onCall<InitiateChallengeRequest>(
         throw new HttpsError("failed-precondition", "Cannot challenge yourself");
       }
 
+      // Identify other players (not challenger, not challenged) for voting
+      const otherPlayerIds = game.playerIds.filter(
+        (id) => id !== challengerId && id !== challengedPlayerId && !game.players[id].isEliminated
+      );
+
       // Create pending challenge
       const pendingChallenge: PendingChallenge = {
         challengerId,
@@ -241,6 +250,8 @@ export const initiateChallenge = onCall<InitiateChallengeRequest>(
         wordFragment: game.currentWord,
         responseDeadline: calculateChallengeDeadline(game.settings),
         createdAt: Timestamp.now(),
+        otherPlayerIds,
+        otherPlayerVotes: {},
       };
 
       // Write turn history
@@ -262,6 +273,7 @@ export const initiateChallenge = onCall<InitiateChallengeRequest>(
         status: "challenge_pending",
         pendingChallenge,
         turnNumber: game.turnNumber + 1,
+        wordTurnNumber: game.wordTurnNumber + 1,
         updatedAt: FieldValue.serverTimestamp(),
       });
 
@@ -389,6 +401,47 @@ export const respondToChallenge = onCall<RespondToChallengeRequest>(
         score: newScore,
       };
 
+      // Multi-player: distribute points to other players who joined the challenge
+      const playerResults: Record<string, ChallengePlayerResult> = {};
+      const otherVotes = challenge.otherPlayerVotes || {};
+
+      // The original challenger always counts as "joined"
+      playerResults[challenge.challengerId] = {
+        joined: true,
+        pointsAwarded: validationResult.isValid ? 0 : scoringResult.totalAwarded,
+      };
+
+      // Defender result
+      playerResults[challenge.challengedPlayerId] = {
+        joined: false, // defender doesn't "join" — they respond
+        pointsAwarded: validationResult.isValid ? scoringResult.totalAwarded : 0,
+      };
+
+      for (const [voterId, voteData] of Object.entries(otherVotes)) {
+        const joined = voteData.type === "join";
+        let voterPoints = 0;
+
+        if (joined && !validationResult.isValid) {
+          // Word was invalid — joiners also get bluff bonus
+          const joinerScore = calculateChallengerWinScore(
+            challenge.wordFragment,
+            voterId,
+            game.players[voterId].displayName,
+            game.settings.dictionary
+          );
+          voterPoints = joinerScore.totalAwarded;
+          updatedPlayers[voterId] = {
+            ...updatedPlayers[voterId],
+            score: updatedPlayers[voterId].score + voterPoints,
+          };
+        }
+
+        playerResults[voterId] = {
+          joined,
+          pointsAwarded: voterPoints,
+        };
+      }
+
       // Check for game winner
       const winCheck = checkForWinner(
         updatedPlayers,
@@ -450,6 +503,7 @@ export const respondToChallenge = onCall<RespondToChallengeRequest>(
         claimedWord: normalizedWord,
         validationResult,
         scoringResult,
+        playerResults,
         timestamp: FieldValue.serverTimestamp(),
       });
 
@@ -462,6 +516,9 @@ export const respondToChallenge = onCall<RespondToChallengeRequest>(
         winnerName: scoringResult.winnerName,
         pointsAwarded: scoringResult.totalAwarded,
         timestamp: Timestamp.now(),
+        challengerName: challenge.challengerName,
+        challengedPlayerName: challenge.challengedPlayerName,
+        playerResults,
       };
 
       // Build game update
@@ -471,6 +528,7 @@ export const respondToChallenge = onCall<RespondToChallengeRequest>(
         pendingChallenge: null,
         currentPlayerIndex: nextPlayerIndex,
         turnNumber: game.turnNumber + 1,
+        wordTurnNumber: 1,
         players: updatedPlayers,
         lastAction,
         challengeHistory: FieldValue.arrayUnion(historyEntry),
@@ -497,6 +555,80 @@ export const respondToChallenge = onCall<RespondToChallengeRequest>(
         isGameOver: winCheck.hasWinner,
         winnerId: winCheck.winnerId,
       };
+    });
+
+    return result;
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════
+// VOTE ON CHALLENGE (Multi-player: other players join or pass)
+// ═══════════════════════════════════════════════════════════════
+
+export const voteOnChallenge = onCall<VoteOnChallengeRequest>(
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Must be signed in");
+    }
+
+    const voterId = request.auth.uid;
+    const { gameId, vote } = request.data;
+
+    if (!gameId) {
+      throw new HttpsError("invalid-argument", "Missing gameId");
+    }
+    if (!["join", "pass"].includes(vote)) {
+      throw new HttpsError("invalid-argument", "Vote must be 'join' or 'pass'");
+    }
+
+    const result = await db.runTransaction(async (transaction) => {
+      const gameRef = db.collection("games").doc(gameId);
+      const gameDoc = await transaction.get(gameRef);
+
+      if (!gameDoc.exists) {
+        throw new HttpsError("not-found", "Game not found");
+      }
+
+      const game = gameDoc.data() as Game;
+
+      if (game.status !== "challenge_pending") {
+        throw new HttpsError("failed-precondition", "No pending challenge");
+      }
+
+      const challenge = game.pendingChallenge!;
+
+      // Verify this player is an eligible voter
+      if (!challenge.otherPlayerIds?.includes(voterId)) {
+        throw new HttpsError(
+          "permission-denied",
+          "You are not eligible to vote on this challenge"
+        );
+      }
+
+      // Check if already voted
+      if (challenge.otherPlayerVotes?.[voterId]) {
+        throw new HttpsError("already-exists", "You already voted");
+      }
+
+      // Check deadline
+      if (challenge.responseDeadline.toDate() < new Date()) {
+        throw new HttpsError("deadline-exceeded", "Response time has expired");
+      }
+
+      // Record the vote
+      const updatedVotes = { ...(challenge.otherPlayerVotes || {}) };
+      updatedVotes[voterId] = {
+        type: vote,
+        playerName: game.players[voterId].displayName,
+        votedAt: Timestamp.now(),
+      };
+
+      transaction.update(gameRef, {
+        "pendingChallenge.otherPlayerVotes": updatedVotes,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      return { success: true, vote };
     });
 
     return result;
@@ -596,6 +728,23 @@ async function handleChallengeTimeout(gameId: string): Promise<void> {
       score: newScore,
     };
 
+    // Multi-player: joiners also get bluff bonus on timeout (defender failed)
+    const otherVotes = challenge.otherPlayerVotes || {};
+    for (const [voterId, voteData] of Object.entries(otherVotes)) {
+      if (voteData.type === "join") {
+        const joinerScore = calculateChallengerWinScore(
+          challenge.wordFragment,
+          voterId,
+          freshGame.players[voterId].displayName,
+          freshGame.settings.dictionary
+        );
+        updatedPlayers[voterId] = {
+          ...updatedPlayers[voterId],
+          score: updatedPlayers[voterId].score + joinerScore.totalAwarded,
+        };
+      }
+    }
+
     // Check for winner
     const winCheck = checkForWinner(
       updatedPlayers,
@@ -664,6 +813,8 @@ async function handleChallengeTimeout(gameId: string): Promise<void> {
       winnerName: scoringResult.winnerName,
       pointsAwarded: scoringResult.totalAwarded,
       timestamp: Timestamp.now(),
+      challengerName: challenge.challengerName,
+      challengedPlayerName: challenge.challengedPlayerName,
     };
 
     const gameUpdate: Record<string, unknown> = {
@@ -672,6 +823,7 @@ async function handleChallengeTimeout(gameId: string): Promise<void> {
       pendingChallenge: null,
       currentPlayerIndex: nextPlayerIndex,
       turnNumber: freshGame.turnNumber + 1,
+      wordTurnNumber: 1,
       players: updatedPlayers,
       lastAction,
       challengeHistory: FieldValue.arrayUnion(historyEntry),
@@ -714,6 +866,31 @@ async function handleWordCallTimeout(gameId: string): Promise<void> {
     // Verify deadline passed
     if (wordCall.responseDeadline.toDate() > new Date()) return;
 
+    // Multi-player: fill in missing votes as "accept" (timeout default)
+    const isMultiPlayer = wordCall.allResponderIds && wordCall.allResponderIds.length > 1;
+    if (isMultiPlayer) {
+      const filledVotes = { ...(wordCall.responderVotes || {}) };
+      for (const id of wordCall.allResponderIds!) {
+        if (!(id in filledVotes)) {
+          filledVotes[id] = {
+            type: "accept" as const,
+            playerName: freshGame.players[id].displayName,
+            votedAt: Timestamp.now(),
+          };
+        }
+      }
+      // Resolve using multi-player logic
+      resolveMultiPlayerWordCall(
+        transaction,
+        gameRef,
+        freshGame,
+        wordCall,
+        filledVotes
+      );
+      return;
+    }
+
+    // Legacy 2-player timeout path
     // Validate the called word
     const calledWordValid = validateClaimedWord(
       wordCall.calledWord,
@@ -812,6 +989,8 @@ async function handleWordCallTimeout(gameId: string): Promise<void> {
       winnerName,
       pointsAwarded,
       timestamp: Timestamp.now(),
+      callerName: wordCall.callerName,
+      responderName: wordCall.responderName,
     };
 
     const gameUpdate: Record<string, unknown> = {
@@ -820,6 +999,7 @@ async function handleWordCallTimeout(gameId: string): Promise<void> {
       pendingWordCall: null,
       currentPlayerIndex: nextPlayerIndex,
       turnNumber: freshGame.turnNumber + 1,
+      wordTurnNumber: 1,
       players: updatedPlayers,
       lastAction,
       wordCallHistory: FieldValue.arrayUnion(historyEntry),
@@ -903,7 +1083,12 @@ export const callWord = onCall<CallWordRequest>(async (request) => {
       );
     }
 
-    // Get responder (opponent)
+    // Get all non-caller players who can respond
+    const allResponderIds = game.playerIds.filter(
+      (id) => id !== callerId && !game.players[id].isEliminated
+    );
+
+    // Legacy: first responder for 2-player compat
     const responderIndex = getNextPlayerIndex(
       game.playerIds,
       game.players,
@@ -921,6 +1106,8 @@ export const callWord = onCall<CallWordRequest>(async (request) => {
       calledWord: normalizedWord,
       responseDeadline: calculateChallengeDeadline(game.settings),
       createdAt: Timestamp.now(),
+      allResponderIds,
+      responderVotes: {},
     };
 
     // Write turn history
@@ -942,6 +1129,7 @@ export const callWord = onCall<CallWordRequest>(async (request) => {
       status: "word_call_pending",
       pendingWordCall,
       turnNumber: game.turnNumber + 1,
+      wordTurnNumber: game.wordTurnNumber + 1,
       updatedAt: FieldValue.serverTimestamp(),
     });
 
@@ -1000,16 +1188,72 @@ export const respondToWordCall = onCall<RespondToWordCallRequest>(
 
       const wordCall = game.pendingWordCall!;
 
+      // Check deadline (5s grace period for network latency)
+      const deadlineMs = wordCall.responseDeadline.toDate().getTime() + 5000;
+      if (deadlineMs < Date.now()) {
+        throw new HttpsError("deadline-exceeded", "Response time has expired");
+      }
+
+      // Multi-player path: use allResponderIds if available
+      const isMultiPlayer = wordCall.allResponderIds && wordCall.allResponderIds.length > 1;
+
+      if (isMultiPlayer) {
+        // Verify this player is an eligible responder
+        if (!wordCall.allResponderIds!.includes(responderId)) {
+          throw new HttpsError(
+            "permission-denied",
+            "You are not a responder for this word call"
+          );
+        }
+
+        // Check if already voted
+        if (wordCall.responderVotes?.[responderId]) {
+          throw new HttpsError("already-exists", "You already responded");
+        }
+
+        // Record the vote (use null instead of undefined — Firestore rejects undefined)
+        const updatedVotes = { ...(wordCall.responderVotes || {}) };
+        updatedVotes[responderId] = {
+          type: responseType as "continue" | "challenge" | "accept",
+          continuationWord: continuationWord ? continuationWord.trim().toUpperCase() : null,
+          playerName: game.players[responderId].displayName,
+          votedAt: Timestamp.now(),
+        };
+
+        // Check if all responders have voted
+        const allVoted = wordCall.allResponderIds!.every((id) => id in updatedVotes);
+
+        if (allVoted) {
+          // All votes are in — resolve the word call
+          return resolveMultiPlayerWordCall(
+            transaction,
+            gameRef,
+            game,
+            wordCall,
+            updatedVotes
+          );
+        } else {
+          // Not all voted yet — just record the vote and wait
+          transaction.update(gameRef, {
+            "pendingWordCall.responderVotes": updatedVotes,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+
+          return {
+            success: true,
+            voteRecorded: true,
+            allVoted: false,
+            responseType,
+          };
+        }
+      }
+
+      // Legacy 2-player path
       if (wordCall.responderId !== responderId) {
         throw new HttpsError(
           "permission-denied",
           "You are not the responder"
         );
-      }
-
-      // Check deadline
-      if (wordCall.responseDeadline.toDate() < new Date()) {
-        throw new HttpsError("deadline-exceeded", "Response time has expired");
       }
 
       // Handle response based on type
@@ -1043,6 +1287,290 @@ export const respondToWordCall = onCall<RespondToWordCallRequest>(
 /**
  * Handle 'continue' response - responder tries to extend the word
  */
+/**
+ * Resolve a multi-player word call once all votes are in.
+ * Each voter's bet is evaluated independently against the caller's word.
+ */
+function resolveMultiPlayerWordCall(
+  transaction: FirebaseFirestore.Transaction,
+  gameRef: FirebaseFirestore.DocumentReference,
+  game: Game,
+  wordCall: PendingWordCall,
+  votes: Record<string, { type: "continue" | "challenge" | "accept"; continuationWord?: string | null; playerName: string; votedAt: Timestamp }>
+): Record<string, unknown> {
+  const fragmentUpper = wordCall.wordFragment.toUpperCase();
+
+  // Validate the caller's word
+  const calledWordValid = validateClaimedWord(
+    wordCall.calledWord.toUpperCase(),
+    fragmentUpper,
+    game.settings.minWordLength,
+    game.settings.dictionary
+  );
+
+  console.log("=== MULTI-PLAYER WORD CALL RESOLVE ===");
+  console.log("Called word:", wordCall.calledWord, "valid:", calledWordValid.isValid);
+  console.log("Votes:", JSON.stringify(votes));
+
+  const updatedPlayers = { ...game.players };
+  const playerResults: Record<string, WordCallPlayerResult> = {};
+  const wordPot = calculateWordPot(wordCall.wordFragment, game.settings.dictionary);
+
+
+  const calledWordFullPoints = calculateWordPot(wordCall.calledWord, game.settings.dictionary);
+
+  // Track overall best continuation for display purposes
+  let bestContinuationWord: string | null = null;
+  let bestContinuationValid = false;
+
+  // Overall winner tracking (for history display — the highest single earner)
+  let overallWinnerId: string | null = null;
+  let overallWinnerName: string | null = null;
+  let overallPointsAwarded = 0;
+  let callerTotalEarned = 0;
+
+  // First pass: find the best continuation among all "continue" voters
+  // Only the best continuation wins the pot — not all valid continuations
+  let bestContinuationVoterId: string | null = null;
+  let bestContinuationPoints = 0;
+
+  for (const [voterId, vote] of Object.entries(votes)) {
+    if (vote.type === "continue" && vote.continuationWord) {
+      const contWord = vote.continuationWord.toUpperCase();
+      const continuationValid = validateClaimedWord(
+        contWord,
+        fragmentUpper,
+        game.settings.minWordLength,
+        game.settings.dictionary
+      );
+      if (continuationValid.isValid) {
+        const continuationPoints = calculateWordPot(contWord, game.settings.dictionary);
+        if (continuationPoints > bestContinuationPoints) {
+          bestContinuationVoterId = voterId;
+          bestContinuationPoints = continuationPoints;
+          bestContinuationWord = contWord;
+          bestContinuationValid = true;
+        }
+      }
+    }
+  }
+
+  // Second pass: evaluate each voter and award points
+  for (const [voterId, vote] of Object.entries(votes)) {
+    let voterPoints = 0;
+    let voterWon = false;
+    let voterContinuationValid: boolean | undefined;
+
+    switch (vote.type) {
+      case "challenge": {
+        if (!calledWordValid.isValid) {
+          // Successful challenge — voter wins bluff bonus
+          const bluffBonus = Math.max(2, Math.floor(wordPot * 0.3));
+          voterPoints = bluffBonus;
+          voterWon = true;
+        }
+        // If word was valid, challenger gets nothing (bad bet)
+        break;
+      }
+      case "continue": {
+        if (vote.continuationWord) {
+          const contWord = vote.continuationWord.toUpperCase();
+          const continuationValid = validateClaimedWord(
+            contWord,
+            fragmentUpper,
+            game.settings.minWordLength,
+            game.settings.dictionary
+          );
+          voterContinuationValid = continuationValid.isValid;
+
+          // Only the best continuation wins the pot
+          if (voterId === bestContinuationVoterId) {
+            voterPoints = wordPot + (bestContinuationPoints - wordPot);
+            voterWon = true;
+          }
+          // All other continuations (even valid ones) get nothing
+        }
+        break;
+      }
+      case "accept": {
+        // Acceptors earn nothing — passive choice
+        // But caller earns their share of the pot (handled below)
+        break;
+      }
+    }
+
+    // Award voter points
+    if (voterPoints > 0) {
+      updatedPlayers[voterId] = {
+        ...updatedPlayers[voterId],
+        score: updatedPlayers[voterId].score + voterPoints,
+      };
+    }
+
+    playerResults[voterId] = {
+      responseType: vote.type,
+      continuationWord: vote.continuationWord ?? undefined,
+      wasContinuationValid: voterContinuationValid,
+      pointsAwarded: voterPoints,
+      won: voterWon,
+    };
+
+    if (voterPoints > overallPointsAwarded) {
+      overallPointsAwarded = voterPoints;
+      overallWinnerId = voterId;
+      overallWinnerName = game.players[voterId].displayName;
+    }
+  }
+
+  // Calculate caller's earnings: from each voter who accepted or failed their bet
+  const numVoters = Object.keys(votes).length;
+  const perVoterPotShare = numVoters > 0 ? Math.floor((wordPot + (calledWordFullPoints - wordPot)) / numVoters) : 0;
+
+  for (const [voterId] of Object.entries(votes)) {
+    const voterResult = playerResults[voterId];
+    if (!voterResult.won && calledWordValid.isValid) {
+      // This voter's bet failed AND caller's word is valid — caller earns their share
+      callerTotalEarned += perVoterPotShare;
+    }
+  }
+
+  // Award caller's earnings
+  if (callerTotalEarned > 0) {
+    updatedPlayers[wordCall.callerId] = {
+      ...updatedPlayers[wordCall.callerId],
+      score: updatedPlayers[wordCall.callerId].score + callerTotalEarned,
+    };
+  }
+
+  // If caller earned the most, they are the overall winner
+  if (callerTotalEarned > overallPointsAwarded) {
+    overallPointsAwarded = callerTotalEarned;
+    overallWinnerId = wordCall.callerId;
+    overallWinnerName = wordCall.callerName;
+  }
+
+  // Check for game winner
+  const winCheck = checkForWinner(updatedPlayers, game.settings.targetScore);
+
+  // Determine who starts next round: if caller's word was valid and they earned points,
+  // the lowest scorer among non-callers starts; otherwise caller starts
+  let loserId: string;
+  if (calledWordValid.isValid && callerTotalEarned > 0) {
+    // Find the first voter who lost their bet
+    const loser = Object.entries(playerResults).find(([, r]) => !r.won);
+    loserId = loser ? loser[0] : wordCall.callerId;
+  } else {
+    loserId = wordCall.callerId;
+  }
+  const nextPlayerIndex = game.playerIds.indexOf(loserId);
+
+  // Build scoring details (summary — caller perspective)
+  const scoringDetails: ScoringDetails | null = overallPointsAwarded > 0
+    ? {
+        wordPot,
+        wordBonus: calledWordFullPoints - wordPot,
+        bluffBonus: null,
+        totalAwarded: overallPointsAwarded,
+        awardedTo: overallWinnerId!,
+        awardedToName: overallWinnerName!,
+        breakdown: `Multi-player word call: ${overallPointsAwarded} points`,
+      }
+    : null;
+
+  // Determine dominant response type for history
+  const responseTypes = Object.values(votes).map((v) => v.type);
+  const dominantResponseType = responseTypes.includes("continue")
+    ? "continue"
+    : responseTypes.includes("challenge")
+      ? "challenge"
+      : "accept";
+
+  // Build last action
+  const lastAction: LastAction = {
+    playerId: wordCall.callerId,
+    playerName: wordCall.callerName,
+    type: `word_call_${dominantResponseType}`,
+    letter: null,
+    previousWord: wordCall.wordFragment,
+    resultingWord: "",
+    scoringDetails,
+    timestamp: Timestamp.now(),
+  };
+
+  // Write turn history
+  const turnRef = gameRef.collection("turns").doc(String(game.turnNumber + 1));
+  transaction.set(turnRef, {
+    turnNumber: game.turnNumber + 1,
+    playerId: wordCall.callerId,
+    playerDisplayName: wordCall.callerName,
+    actionType: "word_call_multi_resolved",
+    calledWord: wordCall.calledWord,
+    wasCalledWordValid: calledWordValid.isValid,
+    playerResults,
+    overallWinnerId,
+    overallPointsAwarded,
+    timestamp: FieldValue.serverTimestamp(),
+  });
+
+  // Build word call history entry
+  const historyEntry: WordCallHistoryEntry = {
+    wordFragment: wordCall.wordFragment,
+    calledWord: wordCall.calledWord,
+    responseType: dominantResponseType,
+    continuationWord: bestContinuationWord,
+    wasCalledWordValid: calledWordValid.isValid,
+    wasContinuationValid: bestContinuationValid || null,
+    winnerId: overallWinnerId,
+    winnerName: overallWinnerName,
+    pointsAwarded: overallPointsAwarded,
+    timestamp: Timestamp.now(),
+    callerName: wordCall.callerName,
+    responderName: wordCall.responderName,
+    playerResults,
+  };
+
+  // Build game update
+  const gameUpdate: Record<string, unknown> = {
+    currentWord: "",
+    wordPot: 0,
+    pendingWordCall: null,
+    currentPlayerIndex: nextPlayerIndex,
+    turnNumber: game.turnNumber + 1,
+    wordTurnNumber: 1,
+    players: updatedPlayers,
+    lastAction,
+    wordCallHistory: FieldValue.arrayUnion(historyEntry),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+
+  if (winCheck.hasWinner) {
+    gameUpdate.status = "completed";
+    gameUpdate.winnerId = winCheck.winnerId;
+    gameUpdate.winnerName = winCheck.winnerName;
+    gameUpdate.endReason = "target_score_reached";
+    gameUpdate.turnDeadline = null;
+  } else {
+    gameUpdate.status = "in_progress";
+    gameUpdate.turnDeadline = calculateTurnDeadline(game.settings);
+  }
+
+  transaction.update(gameRef, gameUpdate);
+
+  return {
+    success: true,
+    allVoted: true,
+    wasCalledWordValid: calledWordValid.isValid,
+    playerResults,
+    overallWinnerId,
+    overallWinnerName,
+    overallPointsAwarded,
+    isGameOver: winCheck.hasWinner,
+  };
+}
+
+/**
+ * Handle 'continue' response - responder tries to extend the word
+ */
 async function handleContinueResponse(
   transaction: FirebaseFirestore.Transaction,
   gameRef: FirebaseFirestore.DocumentReference,
@@ -1056,14 +1584,6 @@ async function handleContinueResponse(
     throw new HttpsError(
       "invalid-argument",
       `Word must start with "${wordCall.wordFragment}"`
-    );
-  }
-
-  // Continuation must be longer than called word
-  if (continuationWord.length <= wordCall.calledWord.length) {
-    throw new HttpsError(
-      "invalid-argument",
-      "Continuation word must be longer than called word"
     );
   }
 
@@ -1333,6 +1853,8 @@ function finalizeWordCallResponse(
     winnerName,
     pointsAwarded,
     timestamp: Timestamp.now(),
+    callerName: wordCall.callerName,
+    responderName: wordCall.responderName,
   };
 
   // Build game update
@@ -1342,6 +1864,7 @@ function finalizeWordCallResponse(
     pendingWordCall: null,
     currentPlayerIndex: nextPlayerIndex,
     turnNumber: game.turnNumber + 1,
+    wordTurnNumber: 1,
     players: updatedPlayers,
     lastAction,
     wordCallHistory: FieldValue.arrayUnion(historyEntry),
@@ -1372,3 +1895,360 @@ function finalizeWordCallResponse(
     isGameOver: winCheck.hasWinner,
   };
 }
+
+// ═══════════════════════════════════════════════════════════════
+// ABANDON GAME (Player forfeits mid-game)
+// ═══════════════════════════════════════════════════════════════
+
+export const abandonGame = onCall<{ gameId: string }>(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be signed in");
+  }
+
+  const { gameId } = request.data;
+  const playerId = request.auth.uid;
+
+  if (!gameId || typeof gameId !== "string") {
+    throw new HttpsError("invalid-argument", "Missing gameId");
+  }
+
+  const gameRef = db.collection("games").doc(gameId);
+
+  await db.runTransaction(async (transaction) => {
+    const gameDoc = await transaction.get(gameRef);
+    if (!gameDoc.exists) throw new HttpsError("not-found", "Game not found");
+
+    const game = gameDoc.data() as Game;
+
+    if (!game.playerIds.includes(playerId)) {
+      throw new HttpsError("permission-denied", "Not a player in this game");
+    }
+
+    if (
+      game.status === "in_progress" ||
+      game.status === "challenge_pending" ||
+      game.status === "word_call_pending"
+    ) {
+      // Player is leaving an active game — give the opponent 60 s to wait.
+      // The opponent can choose to quit immediately or wait for auto-win.
+      transaction.update(gameRef, {
+        status: "waiting_for_rejoin",
+        abandonedBy: playerId,
+        rejoinDeadline: Timestamp.fromMillis(Date.now() + 60 * 1000),
+        pendingChallenge: null,
+        pendingWordCall: null,
+        turnDeadline: null,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    } else if (game.status === "waiting_for_rejoin") {
+      if (game.abandonedBy === playerId) {
+        // Player A called abandon again — no-op (use rejoinGame to come back)
+        return;
+      }
+      // Player B chose to quit while waiting — no winner, both forfeited
+      transaction.update(gameRef, {
+        status: "abandoned",
+        winnerId: null,
+        winnerName: null,
+        endReason: "both_forfeited",
+        abandonedBy: FieldValue.delete(),
+        rejoinDeadline: FieldValue.delete(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+    // completed / abandoned — no-op
+  });
+
+  // Cancel the lobby so matchmaking won't redirect back here
+  try {
+    const lobbySnap = await db
+      .collection("lobbies")
+      .where("gameId", "==", gameId)
+      .limit(1)
+      .get();
+    if (!lobbySnap.empty) {
+      await lobbySnap.docs[0].ref.update({
+        status: "cancelled",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+  } catch {
+    // Non-critical
+  }
+
+  return { success: true };
+});
+
+// ═══════════════════════════════════════════════════════════════
+// REJOIN GAME (Player A returns within the 60-second window)
+// ═══════════════════════════════════════════════════════════════
+
+export const rejoinGame = onCall<{ gameId: string }>(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be signed in");
+  }
+
+  const { gameId } = request.data;
+  const playerId = request.auth.uid;
+
+  if (!gameId || typeof gameId !== "string") {
+    throw new HttpsError("invalid-argument", "Missing gameId");
+  }
+
+  const gameRef = db.collection("games").doc(gameId);
+
+  await db.runTransaction(async (transaction) => {
+    const gameDoc = await transaction.get(gameRef);
+    if (!gameDoc.exists) throw new HttpsError("not-found", "Game not found");
+
+    const game = gameDoc.data() as Game;
+
+    if (game.status !== "waiting_for_rejoin") {
+      throw new HttpsError("failed-precondition", "Game is not waiting for rejoin");
+    }
+    if (game.abandonedBy !== playerId) {
+      throw new HttpsError("permission-denied", "You did not abandon this game");
+    }
+    if (game.rejoinDeadline && game.rejoinDeadline.toDate() < new Date()) {
+      throw new HttpsError("deadline-exceeded", "Rejoin window has expired");
+    }
+
+    transaction.update(gameRef, {
+      status: "in_progress",
+      abandonedBy: FieldValue.delete(),
+      rejoinDeadline: FieldValue.delete(),
+      turnDeadline: calculateTurnDeadline(game.settings),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+
+  return { success: true };
+});
+
+// ═══════════════════════════════════════════════════════════════
+// CLAIM ABANDON WIN (Player B calls when the rejoin timer expires)
+// ═══════════════════════════════════════════════════════════════
+
+export const claimAbandonWin = onCall<{ gameId: string }>(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be signed in");
+  }
+
+  const { gameId } = request.data;
+  const playerId = request.auth.uid;
+
+  if (!gameId || typeof gameId !== "string") {
+    throw new HttpsError("invalid-argument", "Missing gameId");
+  }
+
+  const gameRef = db.collection("games").doc(gameId);
+
+  await db.runTransaction(async (transaction) => {
+    const gameDoc = await transaction.get(gameRef);
+    if (!gameDoc.exists) throw new HttpsError("not-found", "Game not found");
+
+    const game = gameDoc.data() as Game;
+
+    if (game.status !== "waiting_for_rejoin") {
+      throw new HttpsError("failed-precondition", "Game is not waiting for rejoin");
+    }
+
+    if (!game.playerIds.includes(playerId)) {
+      throw new HttpsError("permission-denied", "Not a player in this game");
+    }
+
+    // Only the non-abandoning player can claim the win
+    if (game.abandonedBy === playerId) {
+      throw new HttpsError("permission-denied", "You abandoned this game");
+    }
+
+    // Deadline must have passed
+    if (game.rejoinDeadline && game.rejoinDeadline.toDate() > new Date()) {
+      throw new HttpsError("failed-precondition", "Rejoin window has not expired yet");
+    }
+
+    const winnerName = game.players[playerId]?.displayName ?? null;
+    const wordPot = game.wordPot ?? 0;
+    const currentScore = game.players[playerId]?.score ?? 0;
+
+    transaction.update(gameRef, {
+      status: "completed",
+      winnerId: playerId,
+      winnerName,
+      endReason: "opponent_forfeited",
+      [`players.${playerId}.score`]: currentScore + wordPot,
+      wordPot: 0,
+      abandonedBy: FieldValue.delete(),
+      rejoinDeadline: FieldValue.delete(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+
+  // Cancel the lobby
+  try {
+    const lobbySnap = await db
+      .collection("lobbies")
+      .where("gameId", "==", gameId)
+      .limit(1)
+      .get();
+    if (!lobbySnap.empty) {
+      await lobbySnap.docs[0].ref.update({
+        status: "cancelled",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+  } catch { /* non-critical */ }
+
+  return { success: true };
+});
+
+// ═══════════════════════════════════════════════════════════════
+// CLEANUP STALE GAMES (Scheduled)
+// Abandons in-progress games that haven't been updated in 5+ minutes.
+// This covers force-close, network loss, and any other case where
+// abandonGame was never explicitly called.
+// ═══════════════════════════════════════════════════════════════
+
+export const cleanupStaleGames = onSchedule("every 2 minutes", async () => {
+  const staleThreshold = Timestamp.fromMillis(
+    Date.now() - 5 * 60 * 1000 // 5 minutes ago
+  );
+
+  // Query only by updatedAt — single-field index, no composite index needed.
+  // Filter active statuses in code to avoid a missing composite index error.
+  const snapshot = await db
+    .collection("games")
+    .where("updatedAt", "<", staleThreshold)
+    .limit(50)
+    .get();
+
+  const activeStatuses = new Set(["in_progress", "challenge_pending", "word_call_pending"]);
+  const staleGameDocs = snapshot.docs.filter(
+    (doc) => activeStatuses.has(doc.data().status)
+  );
+
+  if (staleGameDocs.length === 0) {
+    console.log("No stale games found");
+    return;
+  }
+
+  // Phase 2: resolve expired waiting_for_rejoin games → opponent wins
+  const waitingSnapshot = await db
+    .collection("games")
+    .where("status", "==", "waiting_for_rejoin")
+    .limit(20)
+    .get();
+
+  const now = new Date();
+  const expiredWaiting = waitingSnapshot.docs.filter((doc) => {
+    const deadline = doc.data().rejoinDeadline as Timestamp | undefined;
+    return deadline && deadline.toDate() < now;
+  });
+
+  for (const gameDoc of expiredWaiting) {
+    try {
+      const game = gameDoc.data() as Game;
+      const winnerId = game.playerIds.find((id: string) => id !== game.abandonedBy) ?? null;
+      const winnerName = winnerId ? (game.players[winnerId]?.displayName ?? null) : null;
+      const wordPot = game.wordPot ?? 0;
+      const winnerScore = winnerId ? (game.players[winnerId]?.score ?? 0) : 0;
+
+      await db.runTransaction(async (tx) => {
+        const freshDoc = await tx.get(gameDoc.ref);
+        if (!freshDoc.exists) return;
+        if (freshDoc.data()?.status !== "waiting_for_rejoin") return;
+
+        const updates: Record<string, unknown> = {
+          status: "completed",
+          winnerId,
+          winnerName,
+          endReason: "opponent_forfeited",
+          abandonedBy: FieldValue.delete(),
+          rejoinDeadline: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        };
+
+        // Award the word pot to the winner's score
+        if (winnerId && wordPot > 0) {
+          updates[`players.${winnerId}.score`] = winnerScore + wordPot;
+          updates.wordPot = 0;
+        }
+
+        tx.update(gameDoc.ref, updates);
+      });
+
+      try {
+        const lobbySnap = await db
+          .collection("lobbies")
+          .where("gameId", "==", gameDoc.id)
+          .limit(1)
+          .get();
+        if (!lobbySnap.empty) {
+          await lobbySnap.docs[0].ref.update({
+            status: "cancelled",
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+      } catch { /* non-critical */ }
+
+      console.log(`Expired rejoin: game ${gameDoc.id}, winner: ${winnerName}`);
+    } catch (err) {
+      console.error(`Failed to resolve expired rejoin for game ${gameDoc.id}:`, err);
+    }
+  }
+
+  console.log(`Found ${staleGameDocs.length} stale games to abandon`);
+
+  for (const gameDoc of staleGameDocs) {
+    try {
+      const game = gameDoc.data() as Game;
+
+      // Award win to the opponent of whoever should have moved next.
+      // For in_progress: currentPlayerIndex is the player who hasn't moved.
+      // For pending states: same logic — the current player is the slow one.
+      const offenderId = game.playerIds[game.currentPlayerIndex];
+      const winnerId = game.playerIds.find((id: string) => id !== offenderId) ?? null;
+      const winnerName = winnerId ? (game.players[winnerId]?.displayName ?? null) : null;
+
+      await db.runTransaction(async (tx) => {
+        const freshDoc = await tx.get(gameDoc.ref);
+        if (!freshDoc.exists) return;
+        const fresh = freshDoc.data() as Game;
+        // Skip if already resolved (race condition guard)
+        if (fresh.status === "completed" || fresh.status === "abandoned") return;
+
+        tx.update(gameDoc.ref, {
+          status: "abandoned",
+          winnerId,
+          winnerName,
+          endReason: "opponent_forfeited",
+          pendingChallenge: null,
+          pendingWordCall: null,
+          turnDeadline: null,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      });
+
+      // Mark linked lobby as cancelled
+      try {
+        const lobbySnap = await db
+          .collection("lobbies")
+          .where("gameId", "==", gameDoc.id)
+          .limit(1)
+          .get();
+        if (!lobbySnap.empty) {
+          await lobbySnap.docs[0].ref.update({
+            status: "cancelled",
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+      } catch {
+        // Non-critical
+      }
+
+      console.log(`Abandoned stale game ${gameDoc.id}, winner: ${winnerName}`);
+    } catch (err) {
+      console.error(`Failed to abandon game ${gameDoc.id}:`, err);
+    }
+  }
+});

@@ -191,6 +191,16 @@ export const addFriendByCode = onCall<AddFriendByCodeRequest>(async (request) =>
   };
   batch.set(receiverFriendRef, receiverFriendData);
 
+  // Maintain reverse index: friendOf[X] = users who have X in their friends subcollection.
+  // userId has targetUserId in their friends → add userId to targetUser.friendOf
+  // targetUserId has userId in their friends → add targetUserId to currentUser.friendOf
+  batch.update(db.collection("users").doc(targetUserId), {
+    friendOf: FieldValue.arrayUnion(userId),
+  });
+  batch.update(db.collection("users").doc(userId), {
+    friendOf: FieldValue.arrayUnion(targetUserId),
+  });
+
   await batch.commit();
 
   return {
@@ -240,11 +250,21 @@ export const acceptFriendRequest = onCall<AcceptFriendRequestRequest>(async (req
     throw new HttpsError("failed-precondition", "Cannot accept your own request");
   }
 
-  // Update both friend entries to accepted
+  // Fetch both users' current online status so friend docs are up-to-date
+  const [currentUserDoc, friendUserDoc] = await Promise.all([
+    db.collection("users").doc(userId).get(),
+    db.collection("users").doc(friendUserId).get(),
+  ]);
+  const currentUserData = currentUserDoc.data();
+  const friendUserData = friendUserDoc.data();
+
+  // Update both friend entries to accepted with fresh online status
   const batch = db.batch();
 
   batch.update(friendRef, {
     status: "accepted",
+    isOnline: friendUserData?.isOnline ?? false,
+    lastActiveAt: friendUserData?.lastActiveAt ?? null,
   });
 
   const otherFriendRef = db
@@ -255,6 +275,8 @@ export const acceptFriendRequest = onCall<AcceptFriendRequestRequest>(async (req
 
   batch.update(otherFriendRef, {
     status: "accepted",
+    isOnline: currentUserData?.isOnline ?? false,
+    lastActiveAt: currentUserData?.lastActiveAt ?? null,
   });
 
   await batch.commit();
@@ -289,6 +311,14 @@ export const declineFriendRequest = onCall<DeclineFriendRequestRequest>(async (r
     db.collection("users").doc(friendUserId).collection("friends").doc(userId)
   );
 
+  // Remove from reverse index
+  batch.update(db.collection("users").doc(friendUserId), {
+    friendOf: FieldValue.arrayRemove(userId),
+  });
+  batch.update(db.collection("users").doc(userId), {
+    friendOf: FieldValue.arrayRemove(friendUserId),
+  });
+
   await batch.commit();
 
   return { success: true };
@@ -320,6 +350,14 @@ export const removeFriend = onCall<RemoveFriendRequest>(async (request) => {
   batch.delete(
     db.collection("users").doc(friendUserId).collection("friends").doc(userId)
   );
+
+  // Remove from reverse index
+  batch.update(db.collection("users").doc(friendUserId), {
+    friendOf: FieldValue.arrayRemove(userId),
+  });
+  batch.update(db.collection("users").doc(userId), {
+    friendOf: FieldValue.arrayRemove(friendUserId),
+  });
 
   await batch.commit();
 
@@ -357,6 +395,11 @@ export const blockFriend = onCall<BlockFriendRequest>(async (request) => {
   batch.delete(
     db.collection("users").doc(friendUserId).collection("friends").doc(userId)
   );
+
+  // /users/{friendUserId}/friends/{userId} is deleted, so remove userId from friendUserId.friendOf
+  batch.update(db.collection("users").doc(friendUserId), {
+    friendOf: FieldValue.arrayRemove(userId),
+  });
 
   await batch.commit();
 

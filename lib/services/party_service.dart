@@ -1,6 +1,8 @@
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../config/app_config.dart';
+
 /// Party service provider
 final partyServiceProvider = Provider<PartyService>((ref) {
   return PartyService(FirebaseFunctions.instance);
@@ -39,6 +41,7 @@ class PartyService {
     final callable = _functions.httpsCallable('createPartyLobby');
     final result = await callable.call<Map<String, dynamic>>({
       'invitedFriendIds': friendIds,
+      'dictionary': kDictionary,
     });
 
     final data = result.data;

@@ -4,8 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/audio_provider.dart';
 
 /// On-screen keyboard for letter input - compact version for small screens
-class GameKeyboard extends ConsumerWidget {
-  final void Function(String letter) onLetterPressed;
+class GameKeyboard extends ConsumerStatefulWidget {
+  final void Function(String letter, Offset keyCenter) onLetterPressed;
   final bool enabled;
   final String language;
   final VoidCallback? onBackspace;
@@ -49,14 +49,27 @@ class GameKeyboard extends ConsumerWidget {
     'Φ': 8, 'Χ': 8, 'Ψ': 10, 'Ω': 3,
   };
 
+  @override
+  ConsumerState<GameKeyboard> createState() => _GameKeyboardState();
+}
+
+class _GameKeyboardState extends ConsumerState<GameKeyboard> {
+  /// Persists across rebuilds — set in onTapDown, read in onTap.
+  /// Stored in State so 60fps animation-driven rebuilds don't reset it.
+  Offset _lastKeyCenter = Offset.zero;
+
   List<List<String>> get _rows =>
-      language == 'greek' ? _greekRows : _englishRows;
+      widget.language == 'greek'
+          ? GameKeyboard._greekRows
+          : GameKeyboard._englishRows;
 
   Map<String, int> get _letterPoints =>
-      language == 'greek' ? _greekPoints : _englishPoints;
+      widget.language == 'greek'
+          ? GameKeyboard._greekPoints
+          : GameKeyboard._englishPoints;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final rows = _rows;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -64,111 +77,137 @@ class GameKeyboard extends ConsumerWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           for (int i = 0; i < rows.length; i++)
-            _buildRow(context, ref, rows[i], isLastRow: i == rows.length - 1),
+            _buildRow(context, rows[i], isLastRow: i == rows.length - 1),
         ],
       ),
     );
   }
 
-  Widget _buildRow(BuildContext context, WidgetRef ref, List<String> letters,
+  Widget _buildRow(BuildContext context, List<String> letters,
       {bool isLastRow = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          ...letters.map((letter) => _buildKey(context, ref, letter)),
-          if (isLastRow && onBackspace != null)
-            _buildBackspaceKey(context, ref),
+          ...letters.map((letter) => _buildKey(context, letter)),
+          if (isLastRow && widget.onBackspace != null)
+            _buildBackspaceKey(context),
         ],
       ),
     );
   }
 
-  Widget _buildKey(BuildContext context, WidgetRef ref, String letter) {
+  Widget _buildKey(BuildContext context, String letter) {
     final colorScheme = Theme.of(context).colorScheme;
     final points = _letterPoints[letter] ?? 0;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Material(
-        color: enabled
+        color: widget.enabled
             ? colorScheme.primaryContainer
-            : colorScheme.surfaceContainerHighest,
+            : colorScheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(6),
         child: InkWell(
-          onTap: enabled
+          onTapDown: widget.enabled
+              ? (details) {
+                  // Store the exact tap position in State.
+                  // No findRenderObject needed — the touch point IS on the key.
+                  _lastKeyCenter = details.globalPosition;
+                }
+              : null,
+          onTap: widget.enabled
               ? () {
                   ref
                       .read(soundEffectsProvider)
                       .play(SoundEffect.letterClick);
-                  onLetterPressed(letter);
+                  // _lastKeyCenter is stored in State — never stale.
+                  widget.onLetterPressed(letter, _lastKeyCenter);
                 }
               : null,
           borderRadius: BorderRadius.circular(6),
           child: Container(
-            width: 28,
-            height: 38,
-            padding: const EdgeInsets.all(1),
-            child: Stack(
-              children: [
-                Center(
-                  child: Text(
-                    letter,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                      color: enabled
-                          ? colorScheme.onPrimaryContainer
-                          : colorScheme.onSurface.withAlpha(102),
+                width: 28,
+                height: 38,
+                padding: const EdgeInsets.all(1),
+                decoration: widget.enabled
+                    ? null
+                    : BoxDecoration(
+                        border: Border.all(
+                          color: colorScheme.outlineVariant,
+                          width: 0.5,
+                        ),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                child: Stack(
+                  children: [
+                    Center(
+                      child: Text(
+                        letter,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: widget.enabled
+                              ? colorScheme.onPrimaryContainer
+                              : colorScheme.onSurfaceVariant,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                Positioned(
-                  right: 1,
-                  bottom: 0,
-                  child: Text(
-                    '$points',
-                    style: TextStyle(
-                      fontSize: 8,
-                      fontWeight: FontWeight.w600,
-                      color: enabled
-                          ? colorScheme.onPrimaryContainer.withAlpha(179)
-                          : colorScheme.onSurface.withAlpha(77),
+                    Positioned(
+                      right: 1,
+                      bottom: 0,
+                      child: Text(
+                        '$points',
+                        style: TextStyle(
+                          fontSize: 8,
+                          fontWeight: FontWeight.w600,
+                          color: widget.enabled
+                              ? colorScheme.onPrimaryContainer.withAlpha(179)
+                              : colorScheme.onSurfaceVariant.withAlpha(153),
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
-            ),
-          ),
+              ),
         ),
       ),
     );
   }
 
-  Widget _buildBackspaceKey(BuildContext context, WidgetRef ref) {
+  Widget _buildBackspaceKey(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Material(
-        color: enabled
+        color: widget.enabled
             ? colorScheme.secondaryContainer
-            : colorScheme.surfaceContainerHighest,
+            : colorScheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(6),
         child: InkWell(
-          onTap: enabled ? onBackspace : null,
+          onTap: widget.enabled ? widget.onBackspace : null,
           borderRadius: BorderRadius.circular(6),
           child: Container(
             width: 42,
             height: 38,
             alignment: Alignment.center,
+            decoration: widget.enabled
+                ? null
+                : BoxDecoration(
+                    border: Border.all(
+                      color: colorScheme.outlineVariant,
+                      width: 0.5,
+                    ),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
             child: Icon(
               Icons.backspace_outlined,
               size: 18,
-              color: enabled
+              color: widget.enabled
                   ? colorScheme.onSecondaryContainer
-                  : colorScheme.onSurface.withAlpha(102),
+                  : colorScheme.onSurfaceVariant,
             ),
           ),
         ),

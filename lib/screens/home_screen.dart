@@ -1,19 +1,26 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/app_strings.dart';
 import '../models/friend_challenge.dart';
+import '../models/game.dart';
 import '../providers/auth_provider.dart';
 import '../providers/audio_provider.dart';
 import '../providers/friend_challenge_provider.dart';
+import '../providers/game_state_provider.dart';
 import '../providers/presence_provider.dart';
+import '../services/game_service.dart';
 import '../services/user_service.dart';
 import '../widgets/incoming_challenge_dialog.dart';
 import 'auth_screen.dart';
 import 'friends_screen.dart';
+import 'game_screen.dart';
 import 'matchmaking_screen.dart';
 import 'party_setup_screen.dart';
+import 'profile_screen.dart';
 
 /// Home screen / Lobby - entry point of the app
 class HomeScreen extends ConsumerStatefulWidget {
@@ -27,6 +34,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     with WidgetsBindingObserver {
   String? _lastShownChallengeId;
   bool _musicStarted = false;
+  bool _rejoinSheetShown = false;
 
   @override
   void initState() {
@@ -53,27 +61,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final presenceManager = ref.read(presenceManagerProvider);
     final musicService = ref.read(backgroundMusicProvider);
 
     switch (state) {
       case AppLifecycleState.resumed:
-        // Ensure profile exists when app resumes
+        // Re-establish presence on resume (RTDB reconnects automatically,
+        // but this ensures the subscription is set up if it wasn't already).
         _startPresence();
-        // Resume music if it was playing before
         musicService.resumeIfNeeded();
         break;
       case AppLifecycleState.detached:
-        // Only stop presence when app is actually closing, not just losing focus
-        presenceManager.stopPresence();
+        // Explicit cleanup on app close. Even if this doesn't fire (common
+        // on web), RTDB onDisconnect() handles it server-side.
+        ref.read(presenceManagerProvider).stopPresence();
         break;
       case AppLifecycleState.paused:
       case AppLifecycleState.inactive:
-        // Don't stop presence on paused/inactive - user might just switch tabs
-        // The heartbeat will timeout after 2 minutes of inactivity if truly gone
-        break;
       case AppLifecycleState.hidden:
-        // Do nothing for hidden state
+        // RTDB onDisconnect() handles offline detection — no action needed.
         break;
     }
   }
@@ -116,6 +121,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               _lastShownChallengeId = challenge.id;
               _showIncomingChallengeDialog(challenge);
             }
+          }
+        });
+      },
+    );
+
+    // Listen for a rejoinable game and auto-show the bottom sheet
+    ref.listen<AsyncValue<Game?>>(
+      rejoinableGameProvider,
+      (previous, next) {
+        next.whenData((game) {
+          if (game != null && !_rejoinSheetShown) {
+            _rejoinSheetShown = true;
+            // Defer to after the current frame — can't show a sheet during build
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _showRejoinSheet(game);
+            });
+          } else if (game == null) {
+            _rejoinSheetShown = false;
           }
         });
       },
@@ -304,6 +327,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         ],
                       ),
 
+                      // Banner ad intentionally omitted from home screen —
+                      // the AdWidget PlatformView intercepts all Flutter touch
+                      // events on Android. Ads are shown between games instead.
                       const SizedBox.shrink(),
                     ],
                   ),
@@ -380,57 +406,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         authState.when(
           data: (user) {
             if (user == null) return const SizedBox(width: 48);
-            final displayName = user.isAnonymous
-                ? S.guest
-                : (user.displayName ?? user.email ?? 'User');
-            return Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                PopupMenuButton<String>(
-                  icon: const Icon(Icons.account_circle, size: 32),
-                  offset: const Offset(0, 40),
-                  onSelected: (value) {
-                    switch (value) {
-                      case 'upgrade':
-                        _onSignInPressed(context);
-                        break;
-                      case 'signout':
-                        _onSignOut(ref);
-                        break;
-                    }
-                  },
-                  itemBuilder: (context) => [
-                    if (user.isAnonymous)
-                      PopupMenuItem(
-                        value: 'upgrade',
-                        child: Row(
-                          children: [
-                            const Icon(Icons.upgrade, size: 20),
-                            const SizedBox(width: 8),
-                            Text(S.upgradeAccount),
-                          ],
+            final profile = ref.watch(currentUserProfileProvider).valueOrNull;
+            final profileName = profile?.displayName;
+            final displayName = (profileName != null && profileName.isNotEmpty)
+                ? profileName
+                : (user.isAnonymous
+                    ? S.guest
+                    : (user.displayName ?? user.email ?? 'User'));
+            return GestureDetector(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ProfileScreen()),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.account_circle, size: 32),
+                  const SizedBox(width: 8),
+                  Text(
+                    displayName,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Colors.grey,
                         ),
-                      ),
-                    PopupMenuItem(
-                      value: 'signout',
-                      child: Row(
-                        children: [
-                          const Icon(Icons.logout, size: 20),
-                          const SizedBox(width: 8),
-                          Text(S.signOut),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  displayName,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.grey,
-                      ),
-                ),
-              ],
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.chevron_right, size: 18, color: Colors.grey),
+                ],
+              ),
             );
           },
           loading: () => const SizedBox(width: 48),
@@ -491,12 +492,49 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  Future<void> _onSignOut(WidgetRef ref) async {
-    // Stop presence before signing out
-    ref.read(presenceManagerProvider).stopPresence();
+  void _showRejoinSheet(Game game) {
+    final userId = ref.read(currentUserProvider)?.uid ?? '';
+    final opponentName =
+        game.getOpponent(userId)?.displayName ?? 'Opponent';
 
-    final authService = ref.read(authServiceProvider);
-    await authService.signOut();
+    showModalBottomSheet<void>(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _RejoinBottomSheet(
+        game: game,
+        opponentName: opponentName,
+        onRejoin: () => _onRejoin(game),
+        onForfeit: () => _onForfeit(game),
+      ),
+    ).then((_) {
+      if (mounted) setState(() => _rejoinSheetShown = false);
+    });
+  }
+
+  Future<void> _onRejoin(Game game) async {
+    try {
+      await ref.read(gameServiceProvider).rejoinGame(game.id);
+    } catch (_) {
+      // best-effort — GameScreen stream will handle current state
+    }
+    if (mounted) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => GameScreen(gameId: game.id)),
+      );
+    }
+  }
+
+  Future<void> _onForfeit(Game game) async {
+    try {
+      await ref.read(gameServiceProvider).abandonGame(game.id);
+    } catch (_) {
+      // best-effort
+    }
   }
 
   void _showHowToPlay(BuildContext context) {
@@ -517,6 +555,196 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: Text(S.gotIt),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Rejoin Bottom Sheet ──────────────────────────────────────────────────────
+
+class _RejoinBottomSheet extends StatefulWidget {
+  final Game game;
+  final String opponentName;
+  final VoidCallback onRejoin;
+  final VoidCallback onForfeit;
+
+  const _RejoinBottomSheet({
+    required this.game,
+    required this.opponentName,
+    required this.onRejoin,
+    required this.onForfeit,
+  });
+
+  @override
+  State<_RejoinBottomSheet> createState() => _RejoinBottomSheetState();
+}
+
+class _RejoinBottomSheetState extends State<_RejoinBottomSheet> {
+  static const int _totalWindowSeconds = 60;
+
+  late int _secondsLeft;
+  Timer? _timer;
+  bool _acted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final deadline = widget.game.rejoinDeadline;
+    if (deadline != null) {
+      final remaining = deadline.difference(DateTime.now()).inSeconds;
+      _secondsLeft = remaining > 0 ? remaining : 0;
+    } else {
+      _secondsLeft = 0;
+    }
+
+    if (_secondsLeft > 0) {
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        setState(() => _secondsLeft = _secondsLeft > 0 ? _secondsLeft - 1 : 0);
+        if (_secondsLeft == 0 && !_acted) {
+          _acted = true;
+          _timer?.cancel();
+          Navigator.of(context).pop();
+          widget.onRejoin();
+        }
+      });
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _acted) return;
+        _acted = true;
+        Navigator.of(context).pop();
+        widget.onRejoin();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = (_secondsLeft / _totalWindowSeconds).clamp(0.0, 1.0);
+    final currentWord = widget.game.currentWord;
+    final wordPot = widget.game.wordPot;
+    final isUrgent = _secondsLeft <= 15;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Drag handle
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade300,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          Text(
+            S.rejoinTitle,
+            style: Theme.of(context)
+                .textTheme
+                .titleLarge
+                ?.copyWith(fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 6),
+
+          Text(
+            S.rejoinVs(widget.opponentName),
+            style: Theme.of(context)
+                .textTheme
+                .bodyLarge
+                ?.copyWith(color: Colors.grey),
+          ),
+
+          if (currentWord.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Text(
+              S.rejoinCurrentWord(currentWord),
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
+
+          if (wordPot > 0) ...[
+            const SizedBox(height: 4),
+            Text(
+              S.rejoinWordPot(wordPot),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Colors.amber.shade700,
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+          ],
+
+          const SizedBox(height: 24),
+
+          Text(
+            S.rejoinSeconds(_secondsLeft),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: isUrgent ? Colors.orange : null,
+                ),
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 8,
+              color: isUrgent
+                  ? Colors.orange
+                  : Theme.of(context).colorScheme.primary,
+              backgroundColor: Colors.grey.shade200,
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                if (_acted) return;
+                _acted = true;
+                _timer?.cancel();
+                Navigator.of(context).pop();
+                widget.onRejoin();
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                child: Text(
+                  S.rejoinNow,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 10),
+
+          TextButton(
+            onPressed: () {
+              if (_acted) return;
+              _acted = true;
+              _timer?.cancel();
+              Navigator.of(context).pop();
+              widget.onForfeit();
+            },
+            child: Text(
+              S.rejoinForfeit(widget.opponentName),
+              style: TextStyle(color: Colors.grey.shade600),
+            ),
           ),
         ],
       ),

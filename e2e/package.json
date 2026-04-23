@@ -1,0 +1,13 @@
+{
+  "name": "callmyword-e2e",
+  "version": "1.0.0",
+  "description": "E2E gameplay test helpers for CallMyWord",
+  "scripts": {
+    "start-game": "node tests/start-game.js",
+    "serve": "flutter run --profile -d web-server --web-port 3000",
+    "install:browsers": "npx playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "^1.50.0"
+  }
+}

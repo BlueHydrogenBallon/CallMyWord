@@ -3,11 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/friend_challenge.dart';
 import '../services/friend_challenge_service.dart';
 import 'auth_provider.dart';
+import 'game_state_provider.dart';
 
 /// Stream of incoming challenges (where current user is the challenged)
 final incomingChallengesProvider = StreamProvider<List<FriendChallenge>>((ref) {
   final userId = ref.watch(currentUserIdProvider);
   if (userId == null) return Stream.value([]);
+
+  // Pause listener during active gameplay — user cannot accept challenges mid-game
+  if (ref.watch(isInActiveGameProvider)) return Stream.value([]);
 
   final challengeService = ref.watch(friendChallengeServiceProvider);
   return challengeService.watchIncomingChallenges(userId);

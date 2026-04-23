@@ -18,6 +18,7 @@ dependencies:
   cloud_firestore: ^5.6.5
   cloud_functions: ^5.3.4
   firebase_messaging: ^15.2.4
+  firebase_database: ^11.3.2
 
   # State Management
   flutter_riverpod: ^2.6.1
@@ -37,6 +38,9 @@ dependencies:
 
   # HTTP
   http: ^1.2.0
+
+  # Ads
+  google_mobile_ads: ^5.1.0
 
 dev_dependencies:
   flutter_test:

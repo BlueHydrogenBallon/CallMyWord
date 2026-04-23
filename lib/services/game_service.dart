@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/game.dart';
@@ -134,6 +135,63 @@ class GameService {
         .get();
 
     return snapshot.docs.map((doc) => Game.fromFirestore(doc)).toList();
+  }
+
+  /// Abandon a game (forfeit — opponent gets 60 s to wait, then wins)
+  Future<void> abandonGame(String gameId) async {
+    final callable = _functions.httpsCallable('abandonGame');
+    await callable.call<void>({'gameId': gameId});
+  }
+
+  /// Rejoin a game that is waiting for the abandoning player to return
+  Future<void> rejoinGame(String gameId) async {
+    final callable = _functions.httpsCallable('rejoinGame');
+    await callable.call<void>({'gameId': gameId});
+  }
+
+  /// Claim a win when the opponent's rejoin deadline has expired
+  Future<void> claimAbandonWin(String gameId) async {
+    final callable = _functions.httpsCallable('claimAbandonWin');
+    await callable.call<void>({'gameId': gameId});
+  }
+
+  /// Watch for a game the current user left but can still rejoin.
+  /// Uses playerIds + status query (covered by existing composite index)
+  /// to satisfy Firestore security rules, then filters abandonedBy in code.
+  Stream<Game?> watchRejoinableGame(String userId) {
+    debugPrint('[REJOIN] watchRejoinableGame started for userId=$userId');
+    return _gamesCollection
+        .where('playerIds', arrayContains: userId)
+        .where('status', isEqualTo: 'waiting_for_rejoin')
+        .limit(5)
+        .snapshots()
+        .map((snap) {
+      debugPrint('[REJOIN] snapshot: ${snap.docs.length} docs');
+      if (snap.docs.isEmpty) return null;
+      for (final doc in snap.docs) {
+        final game = Game.fromFirestore(doc);
+        debugPrint('[REJOIN] doc ${doc.id}: abandonedBy=${game.abandonedBy}, '
+            'userId=$userId, deadline=${game.rejoinDeadline}, '
+            'now=${DateTime.now()}');
+        if (game.abandonedBy == userId &&
+            game.rejoinDeadline != null &&
+            game.rejoinDeadline!.isAfter(DateTime.now())) {
+          debugPrint('[REJOIN] MATCH FOUND: ${game.id}');
+          return game;
+        }
+      }
+      debugPrint('[REJOIN] no matching game after filtering');
+      return null;
+    });
+  }
+
+  /// Vote on an active challenge (multi-player: join or pass)
+  Future<void> voteOnChallenge(String gameId, String vote) async {
+    final callable = _functions.httpsCallable('voteOnChallenge');
+    await callable.call<void>({
+      'gameId': gameId,
+      'vote': vote,
+    });
   }
 
   /// Call a word (declare the word is complete)

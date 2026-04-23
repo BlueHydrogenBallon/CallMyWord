@@ -30,6 +30,7 @@ class _ChallengeWaitingScreenState
   Timer? _countdownTimer;
   int _remainingSeconds = 60;
   bool _isCancelling = false;
+  bool _dialogShown = false;
 
   @override
   void initState() {
@@ -210,7 +211,8 @@ class _ChallengeWaitingScreenState
     switch (challenge.status) {
       case ChallengeStatus.accepted:
         // Navigate to game
-        if (challenge.gameId != null) {
+        if (challenge.gameId != null && !_dialogShown) {
+          _dialogShown = true;
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
               builder: (context) => GameScreen(gameId: challenge.gameId!),
@@ -220,7 +222,10 @@ class _ChallengeWaitingScreenState
         break;
 
       case ChallengeStatus.declined:
-        _showDeclinedDialog();
+        if (!_dialogShown) {
+          _dialogShown = true;
+          _showDeclinedDialog();
+        }
         break;
 
       case ChallengeStatus.expired:

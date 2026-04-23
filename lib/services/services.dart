@@ -1,6 +1,7 @@
 /// Barrel file for all services
 library;
 
+export 'ad_service.dart';
 export 'friend_challenge_service.dart';
 export 'friend_service.dart';
 export 'game_service.dart';

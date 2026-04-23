@@ -1,5 +1,30 @@
 import 'app_config.dart';
 
+/// Scrabble-style letter point values for English
+const Map<String, int> _englishLetterPoints = {
+  'A': 1, 'B': 3, 'C': 3, 'D': 2, 'E': 1,
+  'F': 4, 'G': 2, 'H': 4, 'I': 1, 'J': 8,
+  'K': 5, 'L': 1, 'M': 3, 'N': 1, 'O': 1,
+  'P': 3, 'Q': 10, 'R': 1, 'S': 1, 'T': 1,
+  'U': 1, 'V': 4, 'W': 4, 'X': 8, 'Y': 4,
+  'Z': 10,
+};
+
+/// Scrabble-style letter point values for Greek
+const Map<String, int> _greekLetterPoints = {
+  'Α': 1, 'Β': 8, 'Γ': 4, 'Δ': 4, 'Ε': 1,
+  'Ζ': 10, 'Η': 1, 'Θ': 10, 'Ι': 1, 'Κ': 2,
+  'Λ': 3, 'Μ': 3, 'Ν': 1, 'Ξ': 10, 'Ο': 1,
+  'Π': 2, 'Ρ': 2, 'Σ': 1, 'Τ': 1, 'Υ': 2,
+  'Φ': 8, 'Χ': 8, 'Ψ': 10, 'Ω': 3,
+};
+
+/// Calculate total point value of a word (Scrabble-style)
+int calculateWordPoints(String word) {
+  final points = kIsGreek ? _greekLetterPoints : _englishLetterPoints;
+  return word.toUpperCase().split('').fold(0, (sum, ch) => sum + (points[ch] ?? 0));
+}
+
 /// App-wide strings. Returns Greek or English based on the build-time
 /// DICTIONARY constant (`--dart-define=DICTIONARY=greek`).
 class S {
@@ -19,6 +44,7 @@ class S {
   static String get offline => kIsGreek ? 'Εκτός σύνδεσης' : 'Offline';
   static String get challenge => kIsGreek ? 'Πρόκληση' : 'Challenge';
   static String get somethingWentWrong => kIsGreek ? 'Κάτι πήγε στραβά' : 'Something went wrong';
+  static String get timeExpired => kIsGreek ? 'Ο χρόνος έληξε' : 'Time expired';
   static String get tryAgain => kIsGreek ? 'Δοκιμή ξανά' : 'Try Again';
   static String get no => kIsGreek ? 'Όχι' : 'No';
   static String get close => kIsGreek ? 'Κλείσιμο' : 'Close';
@@ -104,13 +130,16 @@ class S {
       kIsGreek ? 'Συνέχεια' : 'Continue';
   static String get acceptWord => kIsGreek ? 'Αποδοχή' : 'Accept';
   static String enterLongerWordStartingWith(String word) => kIsGreek
-      ? 'Πληκτρολόγησε μεγαλύτερη έγκυρη λέξη που ξεκινά με "$word":'
-      : 'Enter a longer valid word starting with "$word":';
+      ? 'Πληκτρολόγησε έγκυρη λέξη με μεγαλύτερη αξία που ξεκινά με "$word":'
+      : 'Enter a higher-value valid word starting with "$word":';
   static String wordHintContinuation(String f) =>
-      kIsGreek ? 'π.χ., ${f}ΩΝΑ' : 'e.g., ${f}FYING';
+      kIsGreek ? 'π.χ., $fΩΝΑ' : 'e.g., ${f}FYING';
   static String mustBeLongerThan(String word) => kIsGreek
       ? 'Πρέπει να είναι μεγαλύτερη από "$word" για να κερδίσεις!'
       : 'Must be longer than "$word" to win!';
+  static String mustHaveHigherValueThan(String word, int pts) => kIsGreek
+      ? 'Πρέπει να έχει περισσότερους πόντους από "$word" ($pts pts) για να κερδίσεις!'
+      : 'Must have higher value than "$word" ($pts pts) to win!';
   static String get yourTurn => kIsGreek ? 'Σειρά σου' : 'Your turn';
   static String get opponentsTurn =>
       kIsGreek ? 'Σειρά αντιπάλου' : "Opponent's turn";
@@ -123,7 +152,7 @@ class S {
   static String get leaveGame =>
       kIsGreek ? 'Έξοδος από το Παιχνίδι;' : 'Leave Game?';
   static String get leaveGameConfirm =>
-      kIsGreek ? 'Θα χάσεις το παιχνίδι.' : 'You will forfeit the game.';
+      kIsGreek ? 'Θα χάσεις το παιχνίδι και ο αντίπαλός σου θα κερδίσει.' : 'You will forfeit the game and your opponent will win.';
   static String get stay => kIsGreek ? 'Μείνε' : 'Stay';
   static String get leave => kIsGreek ? 'Έξοδος' : 'Leave';
   static String get potWon =>
@@ -171,6 +200,53 @@ class S {
       kIsGreek ? 'Η πρόκληση έληξε!' : 'Challenge timed out!';
   static String get opponentForfeited =>
       kIsGreek ? 'Ο αντίπαλος αποχώρησε' : 'Opponent forfeited';
+  static String get wordsPlayed =>
+      kIsGreek ? 'Λέξεις που παίχτηκαν' : 'Words Played';
+  static String get wordValidLabel => kIsGreek ? 'Έγκυρη' : 'Valid';
+  static String get wordInvalidLabel => kIsGreek ? 'Άκυρη' : 'Invalid';
+  static String wonWithWord(String name, int pts) => kIsGreek
+      ? '$name κέρδισε +$pts με τη λέξη:'
+      : '$name won +$pts with the word:';
+  static String get wonWithWordYou => kIsGreek
+      ? 'Κέρδισες με τη λέξη:'
+      : 'You won with the word:';
+  static String wonWithWordYouPts(int pts) => kIsGreek
+      ? 'Κέρδισες +$pts με τη λέξη:'
+      : 'You won +$pts with the word:';
+  static String wonChallenge(String name, int pts) => kIsGreek
+      ? '$name κέρδισε την πρόκληση +$pts'
+      : '$name won the challenge +$pts';
+  static String wonChallengeYou(int pts) => kIsGreek
+      ? 'Κέρδισες την πρόκληση +$pts'
+      : 'You won the challenge +$pts';
+  static String nextRoundIn(int n) => kIsGreek
+      ? 'Ο επόμενος γύρος ξεκινά σε $n δευτ.'
+      : 'Next round will begin in $n sec';
+  static String get opponentLeftTitle =>
+      kIsGreek ? 'Ο αντίπαλος έφυγε' : 'Opponent Left';
+  static String opponentLeftBody(int seconds) => kIsGreek
+      ? 'Αν δεν επιστρέψει σε ${seconds}s, κερδίζεις το παιχνίδι!'
+      : 'If they don\'t return in ${seconds}s, you win!';
+  static String get waitAndWin =>
+      kIsGreek ? 'Περίμενε και κέρδισε' : 'Wait & Win';
+  static String get quitAndLose =>
+      kIsGreek ? 'Έξοδος (χάνεις)' : 'Quit (lose)';
+
+  // ─── Rejoin Sheet ─────────────────────────────────────────────────────────
+
+  static String get rejoinTitle => kIsGreek
+      ? 'Άφησες ένα παιχνίδι σε εξέλιξη'
+      : 'You left a game in progress';
+  static String rejoinVs(String name) => kIsGreek ? 'εναντίον $name' : 'vs. $name';
+  static String rejoinCurrentWord(String word) =>
+      kIsGreek ? 'Τρέχον τμήμα: $word' : 'Current fragment: $word';
+  static String rejoinWordPot(int pts) =>
+      kIsGreek ? 'Pot λέξης: $pts πόντοι' : 'Word pot: $pts pts';
+  static String rejoinSeconds(int s) =>
+      kIsGreek ? '$s δευτερόλεπτα — επιστροφή αυτόματα!' : '$s seconds — auto-rejoining!';
+  static String get rejoinNow => kIsGreek ? 'Επιστροφή Τώρα' : 'Rejoin Now';
+  static String rejoinForfeit(String name) =>
+      kIsGreek ? 'Όχι ευχαριστώ — $name κερδίζει' : 'No thanks — let $name win';
 
   // ─── Auth Screen ──────────────────────────────────────────────────────────
 
@@ -178,9 +254,16 @@ class S {
       kIsGreek ? 'Δημιουργία Λογαριασμού' : 'Create Account';
   static String get playAsGuest =>
       kIsGreek ? 'Παίξε ως Επισκέπτης' : 'Play as Guest';
+  static String get chooseNickname =>
+      kIsGreek ? 'Επίλεξε Όνομα Χρήστη' : 'Choose a Username';
+  static String get nicknameHint =>
+      kIsGreek ? 'Το όνομά σου στο παιχνίδι' : 'Your name in game';
+  static String get confirm => kIsGreek ? 'Επιβεβαίωση' : 'Confirm';
   static String get orSeparator => kIsGreek ? 'Ή' : 'OR';
   static String get displayName =>
       kIsGreek ? 'Όνομα Εμφάνισης' : 'Display Name';
+  static String get username =>
+      kIsGreek ? 'Όνομα Χρήστη' : 'Username';
   static String get yourNameInGame =>
       kIsGreek ? 'Το όνομά σου στο παιχνίδι' : 'Your name in game';
   static String get email => 'Email';
@@ -379,11 +462,11 @@ class S {
 
   static String get justNow => kIsGreek ? 'Μόλις τώρα' : 'Just now';
   static String minutesAgo(int m) =>
-      kIsGreek ? '${m}λ. πριν' : '${m}m ago';
+      kIsGreek ? '$mλ. πριν' : '${m}m ago';
   static String hoursAgo(int h) =>
-      kIsGreek ? '${h}ω. πριν' : '${h}h ago';
+      kIsGreek ? '$hω. πριν' : '${h}h ago';
   static String daysAgo(int d) =>
-      kIsGreek ? '${d}μ. πριν' : '${d}d ago';
+      kIsGreek ? '$dμ. πριν' : '${d}d ago';
   static String get overAWeekAgo =>
       kIsGreek ? 'Πάνω από μια βδομάδα' : 'Over a week ago';
 
@@ -416,4 +499,83 @@ class S {
   static String wordMustBeLongerThan(String word) => kIsGreek
       ? 'Η λέξη πρέπει να είναι μεγαλύτερη από "$word"'
       : 'Word must be longer than "$word"';
+
+  // ─── Profile Screen ─────────────────────────────────────────────────────
+
+  static String get profile => kIsGreek ? 'Προφίλ' : 'Profile';
+  static String get setUsername =>
+      kIsGreek ? 'Όρισε Όνομα Χρήστη' : 'Set Username';
+  static String get usernameHint =>
+      kIsGreek ? 'ονομα_χρηστη' : 'your_username';
+  static String get usernameTooShort => kIsGreek
+      ? 'Τουλάχιστον 3 χαρακτήρες'
+      : 'At least 3 characters';
+  static String get usernameInvalidChars => kIsGreek
+      ? 'Μόνο γράμματα, αριθμοί και _'
+      : 'Only letters, numbers, and underscores';
+  static String get usernameTaken =>
+      kIsGreek ? 'Το όνομα χρήστη είναι κατειλημμένο' : 'Username is taken';
+  static String get usernameRules => kIsGreek
+      ? '3-20 χαρακτήρες: γράμματα, αριθμοί, κάτω παύλα'
+      : '3-20 characters: letters, numbers, underscores';
+  static String get save => kIsGreek ? 'Αποθήκευση' : 'Save';
+  static String get chooseAvatar =>
+      kIsGreek ? 'Επιλογή Avatar' : 'Choose Avatar';
+  static String get memberSince =>
+      kIsGreek ? 'Μέλος από' : 'Member since';
+  static String get gamesPlayedLabel =>
+      kIsGreek ? 'Παιχνίδια' : 'Games';
+  static String get gamesWonLabel => kIsGreek ? 'Νίκες' : 'Wins';
+  static String get winRateLabel => kIsGreek ? 'Ποσοστό' : 'Win %';
+  static String get totalPointsLabel =>
+      kIsGreek ? 'Πόντοι' : 'Points';
+  static String get statistics =>
+      kIsGreek ? 'Στατιστικά' : 'Statistics';
+  static String get gameHistory =>
+      kIsGreek ? 'Ιστορικό Παιχνιδιών' : 'Game History';
+  static String get noGamesYet =>
+      kIsGreek ? 'Δεν υπάρχουν παιχνίδια ακόμα' : 'No games yet';
+  static String get viewAll => kIsGreek ? 'Προβολή όλων' : 'View All';
+  static String get won => kIsGreek ? 'Νίκη' : 'Won';
+  static String get lost => kIsGreek ? 'Ήττα' : 'Lost';
+  static String get vs => 'vs';
+  static String get account => kIsGreek ? 'Λογαριασμός' : 'Account';
+  static String get changeDisplayName =>
+      kIsGreek ? 'Αλλαγή Ονόματος' : 'Change Display Name';
+  static String get changeUsername =>
+      kIsGreek ? 'Αλλαγή Ονόματος Χρήστη' : 'Change Username';
+  static String get changeEmail =>
+      kIsGreek ? 'Αλλαγή Email' : 'Change Email';
+  static String get changePassword =>
+      kIsGreek ? 'Αλλαγή Κωδικού' : 'Change Password';
+  static String get enterNewDisplayName => kIsGreek
+      ? 'Εισάγετε νέο όνομα εμφάνισης'
+      : 'Enter new display name';
+  static String get displayNameUpdated => kIsGreek
+      ? 'Το όνομα ενημερώθηκε!'
+      : 'Display name updated!';
+  static String get usernameUpdated => kIsGreek
+      ? 'Το όνομα χρήστη ενημερώθηκε!'
+      : 'Username updated!';
+  static String get avatarUpdated => kIsGreek
+      ? 'Το avatar ενημερώθηκε!'
+      : 'Avatar updated!';
+  static String get enterNewEmail => kIsGreek
+      ? 'Εισάγετε νέο email'
+      : 'Enter new email';
+  static String get enterNewPassword => kIsGreek
+      ? 'Εισάγετε νέο κωδικό'
+      : 'Enter new password';
+  static String get emailUpdated =>
+      kIsGreek ? 'Το email ενημερώθηκε!' : 'Email updated!';
+  static String get passwordUpdated =>
+      kIsGreek ? 'Ο κωδικός ενημερώθηκε!' : 'Password updated!';
+  static String friendCount(int n) =>
+      kIsGreek ? '$n Φίλοι' : '$n Friends';
+  static String get inviteCode =>
+      kIsGreek ? 'Κωδικός Πρόσκλησης' : 'Invite Code';
+  static String get shareInviteCode =>
+      kIsGreek ? 'Μοιράσου τον κωδικό πρόσκλησής σου' : 'Share your invite code';
+  static String get tapToCopyCode =>
+      kIsGreek ? 'Πάτα για αντιγραφή' : 'Tap to copy';
 }

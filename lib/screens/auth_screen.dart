@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/app_strings.dart';
 import '../providers/auth_provider.dart';
+import '../services/user_service.dart';
 
 /// Authentication screen for login/register
 class AuthScreen extends ConsumerStatefulWidget {
@@ -31,6 +32,9 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   }
 
   Future<void> _signInAnonymously() async {
+    final nickname = await _showNicknameDialog();
+    if (nickname == null) return; // user dismissed
+
     setState(() {
       _isLoading = true;
       _error = null;
@@ -38,7 +42,15 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
 
     try {
       final authService = ref.read(authServiceProvider);
-      await authService.signInAnonymously();
+      final credential = await authService.signInAnonymously();
+      final user = credential.user;
+      if (user != null) {
+        await ref.read(userServiceProvider).ensureUserProfile(
+          userId: user.uid,
+          defaultDisplayName: nickname,
+          isAnonymous: true,
+        );
+      }
       if (mounted) {
         Navigator.of(context).pop(true);
       }
@@ -53,6 +65,46 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
         });
       }
     }
+  }
+
+  Future<String?> _showNicknameDialog() async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Text(S.chooseNickname),
+        content: TextField(
+          controller: controller,
+          decoration: InputDecoration(
+            hintText: S.nicknameHint,
+            prefixIcon: const Icon(Icons.person_outline),
+          ),
+          textCapitalization: TextCapitalization.words,
+          maxLength: 20,
+          autofocus: true,
+          onSubmitted: (value) {
+            final trimmed = value.trim();
+            if (trimmed.isNotEmpty) Navigator.of(ctx).pop(trimmed);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(null),
+            child: Text(S.cancel),
+          ),
+          TextButton(
+            onPressed: () {
+              final trimmed = controller.text.trim();
+              if (trimmed.isNotEmpty) Navigator.of(ctx).pop(trimmed);
+            },
+            child: Text(S.confirm),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return result;
   }
 
   Future<void> _submitForm() async {
@@ -76,10 +128,16 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
           _emailController.text.trim(),
           _passwordController.text,
         );
-        // Update display name if provided
-        if (_displayNameController.text.isNotEmpty) {
-          await credential.user?.updateDisplayName(
-            _displayNameController.text.trim(),
+        final user = credential.user;
+        if (user != null) {
+          final displayName = _displayNameController.text.trim();
+          if (displayName.isNotEmpty) {
+            await user.updateDisplayName(displayName);
+          }
+          await ref.read(userServiceProvider).createUserProfile(
+            userId: user.uid,
+            displayName: displayName.isNotEmpty ? displayName : 'User',
+            isAnonymous: false,
           );
         }
       }
@@ -162,14 +220,14 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Display name (only for registration)
+                    // Username (only for registration)
                     if (!_isLogin) ...[
                       TextFormField(
                         controller: _displayNameController,
                         decoration: InputDecoration(
-                          labelText: S.displayName,
-                          hintText: S.yourNameInGame,
-                          prefixIcon: const Icon(Icons.badge_outlined),
+                          labelText: S.username,
+                          hintText: S.nicknameHint,
+                          prefixIcon: const Icon(Icons.person_outline),
                         ),
                         textCapitalization: TextCapitalization.words,
                       ),

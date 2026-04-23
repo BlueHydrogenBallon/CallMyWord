@@ -31,6 +31,7 @@ export const createPartyLobby = onCall<CreatePartyLobbyRequest>(
 
     const hostId = request.auth.uid;
     const invitedFriendIds = request.data.invitedFriendIds;
+    const dictionary = request.data.dictionary || "english";
 
     if (!invitedFriendIds || invitedFriendIds.length === 0) {
       throw new HttpsError("invalid-argument", "Must invite at least one friend");
@@ -98,6 +99,7 @@ export const createPartyLobby = onCall<CreatePartyLobbyRequest>(
       status: "waiting",
       gameId: null,
       isParty: true,
+      dictionary,
     };
 
     const batch = db.batch();
@@ -284,7 +286,7 @@ export const startPartyGame = onCall<StartPartyGameRequest>(
         lobbyId,
         lobby.playerIds,
         lobby.playerNames,
-        getDefaultGameSettings()
+        getDefaultGameSettings(lobby.dictionary || "english")
       );
 
       transaction.set(gameRef, {

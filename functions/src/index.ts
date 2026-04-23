@@ -6,7 +6,7 @@
  * - Game Actions: submitMove, initiateChallenge, respondToChallenge, callWord, respondToWordCall, checkChallengeTimeouts
  * - Friends: generateInviteCode, addFriendByCode, acceptFriendRequest, declineFriendRequest, removeFriend, blockFriend
  * - Friend Challenges: challengeFriend, acceptFriendChallenge, declineFriendChallenge, cancelFriendChallenge, cleanupExpiredChallenges
- * - Presence: onUserPresenceChange, cleanupStalePresence
+ * - Presence: onUserPresenceChange (RTDB trigger)
  */
 
 import { initializeApp } from "firebase-admin/app";
@@ -26,9 +26,14 @@ export {
   submitMove,
   initiateChallenge,
   respondToChallenge,
+  voteOnChallenge,
   callWord,
   respondToWordCall,
   checkChallengeTimeouts,
+  abandonGame,
+  rejoinGame,
+  claimAbandonWin,
+  cleanupStaleGames,
 } from "./game-actions";
 
 // Export friend functions
@@ -51,9 +56,11 @@ export {
 } from "./friend-challenges";
 
 // Export presence functions
+// onUserPresenceChange listens to RTDB /status/{userId} and mirrors to Firestore.
+// Uses the friendOf reverse index — O(1) reads + O(friends) writes.
+// No scheduled cleanup needed — RTDB onDisconnect() handles offline detection.
 export {
   onUserPresenceChange,
-  cleanupStalePresence,
 } from "./presence";
 
 // Export party (multiplayer) functions
@@ -63,3 +70,10 @@ export {
   startPartyGame,
   leavePartyLobby,
 } from "./party";
+
+// Export profile functions
+export {
+  setUsername,
+  getGameHistory,
+  onGameCompleted,
+} from "./profile";

@@ -36,10 +36,13 @@ service cloud.firestore {
         && request.resource.data.displayName.size() >= 2
         && request.resource.data.displayName.size() <= 30;
 
-      // Users can update limited fields on their own profile (including presence fields)
+      // Users can update limited fields on their own profile.
+      // Presence fields (isOnline, lastHeartbeat) are now managed by Cloud Functions
+      // via RTDB triggers — clients no longer write them directly.
+      // lastActiveAt is still written by the client on login/resume.
       allow update: if isOwner(userId)
         && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['displayName', 'avatarUrl', 'lastActiveAt', 'isAnonymous', 'email', 'fcmTokens', 'activeSessions', 'notificationPreferences', 'isOnline', 'lastHeartbeat']);
+            .hasOnly(['displayName', 'username', 'avatarUrl', 'lastActiveAt', 'isAnonymous', 'email', 'fcmTokens', 'activeSessions', 'notificationPreferences', 'totalPointsScored']);
 
       // Users cannot delete profiles
       allow delete: if false;
@@ -107,6 +110,18 @@ service cloud.firestore {
             || request.auth.uid == resource.data.challengedId);
 
       // All challenge writes go through Cloud Functions
+      allow write: if false;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // USERNAMES (uniqueness enforcement)
+    // ═══════════════════════════════════════════════════════════════
+
+    match /usernames/{username} {
+      // Authenticated users can check username availability
+      allow read: if isAuthenticated();
+
+      // All writes go through Cloud Functions for atomic uniqueness
       allow write: if false;
     }
 

@@ -89,7 +89,7 @@ class _PartySetupScreenState extends ConsumerState<PartySetupScreen> {
                     Text(S.errorMsg(error.toString())),
                     const SizedBox(height: 16),
                     ElevatedButton(
-                      onPressed: () => ref.invalidate(friendsProvider),
+                      onPressed: () => ref.invalidate(rawFriendsProvider),
                       child: Text(S.retry),
                     ),
                   ],

@@ -63,13 +63,15 @@ export const joinOrCreateLobby = onCall<JoinOrCreateLobbyRequest>(
 );
 
 /**
- * Find an existing lobby the player is in that's still active
- * Only returns "waiting" lobbies - "started" lobbies have games that may be completed
+ * Find an existing *waiting* lobby the player is already in.
+ * Only returns lobbies still in matchmaking ("waiting" status).
+ * Active / finished games are NOT returned here — rejoining an
+ * in-progress game is handled separately by the client-side
+ * rejoin popup on the home screen.
  */
 async function findExistingLobby(
   playerId: string
 ): Promise<(Lobby & { id: string }) | null> {
-  // First check for waiting lobbies (matchmaking in progress)
   const waitingSnapshot = await db
     .collection("lobbies")
     .where("playerIds", "array-contains", playerId)
@@ -80,28 +82,6 @@ async function findExistingLobby(
   if (!waitingSnapshot.empty) {
     const doc = waitingSnapshot.docs[0];
     return { id: doc.id, ...doc.data() } as Lobby & { id: string };
-  }
-
-  // Check for "started" lobbies with games still in progress
-  const startedSnapshot = await db
-    .collection("lobbies")
-    .where("playerIds", "array-contains", playerId)
-    .where("status", "==", "started")
-    .limit(5)
-    .get();
-
-  for (const lobbyDoc of startedSnapshot.docs) {
-    const lobby = lobbyDoc.data() as Lobby;
-    if (lobby.gameId) {
-      // Check if the game is still in progress
-      const gameDoc = await db.collection("games").doc(lobby.gameId).get();
-      if (gameDoc.exists) {
-        const gameData = gameDoc.data();
-        if (gameData?.status === "in_progress") {
-          return { id: lobbyDoc.id, ...lobby } as Lobby & { id: string };
-        }
-      }
-    }
   }
 
   return null;

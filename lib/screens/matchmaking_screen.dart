@@ -6,7 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../config/app_strings.dart';
 import '../models/lobby.dart';
 import '../providers/auth_provider.dart';
+import '../services/game_service.dart';
 import '../services/matchmaking_service.dart';
+import '../services/user_service.dart';
 import 'game_screen.dart';
 
 /// Matchmaking screen - finds or creates a game lobby
@@ -44,15 +46,29 @@ class _MatchmakingScreenState extends ConsumerState<MatchmakingScreen> {
       final user = ref.read(currentUserProvider);
       final matchmakingService = ref.read(matchmakingServiceProvider);
 
-      // Get player name from auth or use default
-      final playerName = user?.displayName ?? 'Player';
+      // Get player name from Firestore profile (has username set by user),
+      // falling back to Firebase Auth displayName
+      final profile = await ref.read(userServiceProvider).getUserProfile(user!.uid);
+      final playerName = profile?.displayName ?? user.displayName ?? 'Player';
 
       // Join or create lobby
       final result = await matchmakingService.joinOrCreateLobby(playerName);
       _lobbyId = result.lobbyId;
 
-      // If game is already ready (matched immediately), go to game
+      // If game is already ready (matched immediately), verify it's still
+      // active before navigating.  An old lobby whose game just ended can
+      // be returned by the backend in a narrow race window.
       if (result.isGameReady && result.gameId != null) {
+        if (result.alreadyJoined) {
+          final gameDoc = await ref
+              .read(gameServiceProvider)
+              .getGame(result.gameId!);
+          if (gameDoc == null || gameDoc.isGameOver) {
+            // Stale game — restart matchmaking for a fresh lobby.
+            _startMatchmaking();
+            return;
+          }
+        }
         _navigateToGame(result.gameId!);
         return;
       }
@@ -134,11 +150,14 @@ class _MatchmakingScreenState extends ConsumerState<MatchmakingScreen> {
         title: Text(S.findingGame),
         automaticallyImplyLeading: false,
       ),
-      body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
+      body: Column(
+        children: [
+          Expanded(
+            child: SafeArea(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 if (_error != null) ...[
@@ -202,7 +221,11 @@ class _MatchmakingScreenState extends ConsumerState<MatchmakingScreen> {
             ),
           ),
         ),
-      ),
+      ),          // SafeArea
+          ),      // Expanded
+          // Banner ad removed — AdWidget PlatformView causes touch interception on Android.
+        ],        // Column children
+      ),          // body Column
     );
   }
 }
