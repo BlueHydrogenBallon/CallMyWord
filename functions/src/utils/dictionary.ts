@@ -1,0 +1,144 @@
+/**
+ * Dictionary service for word validation
+ * Supports English and Greek word lists
+ */
+
+import { ENGLISH_WORDS } from "./words";
+import { GREEK_WORDS } from "./words_greek";
+
+// Build English prefix set for quick prefix validation
+const VALID_PREFIXES = new Set<string>();
+for (const word of ENGLISH_WORDS) {
+  for (let i = 1; i <= word.length; i++) {
+    VALID_PREFIXES.add(word.substring(0, i));
+  }
+}
+
+// Build Greek prefix set (words are stored uppercase)
+const GREEK_VALID_PREFIXES = new Set<string>();
+for (const word of GREEK_WORDS) {
+  for (let i = 1; i <= word.length; i++) {
+    GREEK_VALID_PREFIXES.add(word.substring(0, i));
+  }
+}
+
+/**
+ * Check if a word exists in the English dictionary
+ */
+export function isValidWord(word: string): boolean {
+  return ENGLISH_WORDS.has(word.toLowerCase());
+}
+
+/**
+ * Check if a word exists in the Greek dictionary
+ */
+export function isValidGreekWord(word: string): boolean {
+  return GREEK_WORDS.has(word.toUpperCase());
+}
+
+/**
+ * Check if a prefix could lead to a valid word
+ */
+export function isValidPrefix(prefix: string): boolean {
+  return VALID_PREFIXES.has(prefix.toLowerCase());
+}
+
+/**
+ * Get words that start with a given prefix
+ */
+export function getWordsWithPrefix(prefix: string, limit = 10): string[] {
+  const p = prefix.toLowerCase();
+  const matches: string[] = [];
+
+  for (const word of ENGLISH_WORDS) {
+    if (word.startsWith(p) && word.length > p.length) {
+      matches.push(word);
+      if (matches.length >= limit) break;
+    }
+  }
+
+  return matches;
+}
+
+/**
+ * Validation result for challenge response
+ */
+export interface WordValidationResult {
+  isValid: boolean;
+  failureReason: string | null;
+  checks: {
+    startsWithFragment: boolean;
+    isInDictionary: boolean;
+    meetsMinLength: boolean;
+    isLongerThanFragment: boolean;
+  };
+}
+
+/**
+ * Validate a claimed word during challenge response
+ */
+export function validateClaimedWord(
+  claimedWord: string,
+  fragment: string,
+  minWordLength: number,
+  dictionary = "english"
+): WordValidationResult {
+  const word = claimedWord.toUpperCase();
+  const frag = fragment.toUpperCase();
+
+  const checks = {
+    startsWithFragment: false,
+    isInDictionary: false,
+    meetsMinLength: false,
+    isLongerThanFragment: false,
+  };
+
+  // Check 1: Starts with the fragment
+  checks.startsWithFragment = word.startsWith(frag);
+  if (!checks.startsWithFragment) {
+    return {
+      isValid: false,
+      failureReason: `Word must start with "${fragment}"`,
+      checks,
+    };
+  }
+
+  // Check 2: Longer than fragment
+  checks.isLongerThanFragment = word.length > frag.length;
+  if (!checks.isLongerThanFragment) {
+    return {
+      isValid: false,
+      failureReason: "Word must be longer than the current letters",
+      checks,
+    };
+  }
+
+  // Check 3: Meets minimum length
+  checks.meetsMinLength = word.length >= minWordLength;
+  if (!checks.meetsMinLength) {
+    return {
+      isValid: false,
+      failureReason: `Word must be at least ${minWordLength} letters`,
+      checks,
+    };
+  }
+
+  // Check 4: Exists in dictionary
+  checks.isInDictionary = dictionary === "greek"
+    ? isValidGreekWord(word)
+    : isValidWord(word);
+  if (!checks.isInDictionary) {
+    return {
+      isValid: false,
+      failureReason: `"${claimedWord}" is not in the dictionary`,
+      checks,
+    };
+  }
+
+  // All checks passed
+  return {
+    isValid: true,
+    failureReason: null,
+    checks,
+  };
+}
